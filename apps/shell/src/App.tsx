@@ -275,6 +275,9 @@ export function App() {
                   </li>
                 ))}
               </ul>
+              {active.length > 0 && finished.length > 0 && (
+                <h2 className="label board-split">active</h2>
+              )}
               <ul>
                 {active.map((j) => (
                   <li key={j.job.id}>
@@ -314,33 +317,35 @@ export function App() {
           </div>
         )}
       </main>
-      <Notices
-        connection={connection}
-        now={now}
-        auth={auth}
-        act={act}
-        restart={restart}
-        approvals={approvals}
-        showApprovalStrip={
-          view.name !== 'home' && view.name !== 'inbox' && !open?.pendingApprovals.length
-        }
-        onInbox={() => go({ name: 'inbox' })}
-      />
-      <InputBar
-        inputRef={inputRef}
-        onSend={(text) => send(text, open?.job.id)}
-        {...(open ? { about: open.job.title } : {})}
-        placeholder={
-          signedOut
-            ? 'Sign in to Claude first'
-            : connection.status !== 'connected'
-              ? 'Connecting… you can type already'
-              : open
-                ? 'Ask about this job'
-                : 'What do you want done?'
-        }
-        history={history}
-      />
+      <div className="dock">
+        <Notices
+          connection={connection}
+          now={now}
+          auth={auth}
+          act={act}
+          restart={restart}
+          approvals={approvals}
+          showApprovalStrip={
+            view.name !== 'home' && view.name !== 'inbox' && !open?.pendingApprovals.length
+          }
+          onInbox={() => go({ name: 'inbox' })}
+        />
+        <InputBar
+          inputRef={inputRef}
+          onSend={(text) => send(text, open?.job.id)}
+          {...(open ? { about: open.job.title } : {})}
+          placeholder={
+            signedOut
+              ? 'Sign in to Claude first'
+              : connection.status !== 'connected'
+                ? 'Connecting… you can type already'
+                : open
+                  ? 'Ask about this job'
+                  : 'What do you want done?'
+          }
+          history={history}
+        />
+      </div>
       <div className="sr-only" role="status" aria-live="polite">
         {announce}
       </div>

@@ -25,12 +25,19 @@ export function TopBar({
       : `daemon ${connection.status}`;
   return (
     <header className="topbar" data-testid="daemon-status">
-      <span title={details}>
-        <span className="dot" data-state={connection.status} aria-hidden="true">
-          ●
-        </span>{' '}
-        mai
-        {!ok && <span className="error"> · daemon {connection.status}</span>}
+      <span className="brand" title={details}>
+        <span className="wordmark">mai</span>
+        <span className="seg">
+          <span className="dot" data-state={connection.status} aria-hidden="true" />
+          <span aria-hidden="true">{ok ? 'online' : ''}</span>
+          {!ok && <span className="error">daemon {connection.status}</span>}
+        </span>
+        {connection.status === 'connected' && (
+          <span className="seg" aria-hidden="true">
+            v{connection.version}
+            {connection.rtt !== undefined && <span> · {connection.rtt} ms</span>}
+          </span>
+        )}
         <span className="sr-only">{ok ? ' daemon connected' : ''}</span>
       </span>
       <nav className="topbar-links">
@@ -51,7 +58,14 @@ export function TopBar({
           aria-keyshortcuts={keyShortcut('I')}
           onClick={onInbox}
         >
-          inbox{inboxCount > 0 ? ` ${inboxCount}` : ''} <Kbd k="I" />
+          inbox
+          {inboxCount > 0 && (
+            <>
+              {' '}
+              <span className="count">{inboxCount}</span>
+            </>
+          )}{' '}
+          <Kbd k="I" />
         </button>
       </nav>
     </header>
@@ -136,11 +150,38 @@ export function Notices({
 export function EmptyState() {
   return (
     <div className="empty">
-      <p>Type what you want done. Jobs run in the background and report back here.</p>
+      <h2 className="label">ready</h2>
+      <p className="empty-lead">
+        Type what you want done. Jobs run in the background and report back here.
+      </p>
       <p className="muted">
         Deleting files outside a job's folder, sudo, git push, and buying or sending things on
         websites always stop and ask you first.
       </p>
+      <dl className="legend">
+        <div>
+          <dt className="kbd">↑</dt>
+          <dd>earlier request</dd>
+        </div>
+        <div>
+          <dt>
+            <Kbd k="1–9" />
+          </dt>
+          <dd>open job</dd>
+        </div>
+        <div>
+          <dt>
+            <Kbd k="F" />
+          </dt>
+          <dd>history</dd>
+        </div>
+        <div>
+          <dt>
+            <Kbd k="I" />
+          </dt>
+          <dd>inbox</dd>
+        </div>
+      </dl>
     </div>
   );
 }
@@ -273,36 +314,44 @@ export function InputBar({
           follow-up about {about} · <span className="kbd">esc</span> for a new request
         </div>
       )}
-      <textarea
-        ref={inputRef}
-        rows={1}
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          recall.current.index = -1;
-        }}
-        onKeyDown={(e) => {
-          const el = e.currentTarget;
-          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault();
-            submit();
-          } else if (e.key === 'ArrowUp' && el.selectionStart === 0 && el.selectionEnd === 0) {
-            e.preventDefault();
-            step(1);
-          } else if (
-            e.key === 'ArrowDown' &&
-            recall.current.index >= 0 &&
-            el.selectionStart === text.length
-          ) {
-            e.preventDefault();
-            step(-1);
-          }
-        }}
-        placeholder={placeholder}
-        aria-label="request"
-        autoComplete="off"
-        spellCheck={false}
-      />
+      <div className="prompt">
+        <span className="prompt-glyph" aria-hidden="true">
+          ›
+        </span>
+        <textarea
+          ref={inputRef}
+          rows={1}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            recall.current.index = -1;
+          }}
+          onKeyDown={(e) => {
+            const el = e.currentTarget;
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              submit();
+            } else if (e.key === 'ArrowUp' && el.selectionStart === 0 && el.selectionEnd === 0) {
+              e.preventDefault();
+              step(1);
+            } else if (
+              e.key === 'ArrowDown' &&
+              recall.current.index >= 0 &&
+              el.selectionStart === text.length
+            ) {
+              e.preventDefault();
+              step(-1);
+            }
+          }}
+          placeholder={placeholder}
+          aria-label="request"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <span className="prompt-hint" aria-hidden="true">
+          <span className="kbd">enter</span> send <span className="kbd">shift enter</span> new line
+        </span>
+      </div>
     </form>
   );
 }
@@ -328,7 +377,7 @@ export function InboxView({
 }) {
   return (
     <div className="job-view" data-testid="inbox">
-      <div className="meta">
+      <div className="crumbs">
         <button type="button" className="link" onClick={onBack} aria-keyshortcuts="Escape">
           ← back{' '}
           <span className="kbd" aria-hidden="true">
@@ -353,7 +402,12 @@ export function InboxView({
         />
       ))}
       {needsYou.map((j) => (
-        <section key={j.job.id} className="needs-you" aria-label={j.job.title}>
+        <section
+          key={j.job.id}
+          className="needs-you"
+          data-status={j.status}
+          aria-label={j.job.title}
+        >
           <div className="approval-head">
             <h3 className="label">{j.status === 'failed' ? 'failed' : 'needs you'}</h3>
             <button type="button" className="link" onClick={() => onOpenJob(j.job.id)}>
@@ -405,42 +459,47 @@ export function HistoryView({
   const sel = Math.min(selected, Math.max(0, found.length - 1));
   return (
     <div className="job-view" data-testid="history">
-      <div className="meta">
+      <div className="crumbs">
         <button type="button" className="link" onClick={onBack} aria-keyshortcuts="Escape">
           ← back{' '}
           <span className="kbd" aria-hidden="true">
             esc
           </span>
         </button>
-        <span>
+        <span className="crumbs-end">
           {found.length} of {jobs.length} jobs
         </span>
       </div>
       <h1>History</h1>
-      <input
-        className="search"
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setSelected(0);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-            e.preventDefault();
-            const by = e.key === 'ArrowDown' ? 1 : -1;
-            setSelected(Math.min(found.length - 1, Math.max(0, sel + by)));
-          } else if (e.key === 'Enter' && found[sel]) {
-            onOpenJob(found[sel].job.id);
-          } else if (e.key === 'Escape' && query) {
-            e.stopPropagation();
-            setQuery('');
-          }
-        }}
-        placeholder="Search titles, instructions, folders and reports · ↑↓ Enter"
-        aria-label="search jobs"
-        // biome-ignore lint/a11y/noAutofocus: the view exists to type a search
-        autoFocus
-      />
+      <div className="searchbar">
+        <span className="prompt-glyph" aria-hidden="true">
+          /
+        </span>
+        <input
+          className="search"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setSelected(0);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              const by = e.key === 'ArrowDown' ? 1 : -1;
+              setSelected(Math.min(found.length - 1, Math.max(0, sel + by)));
+            } else if (e.key === 'Enter' && found[sel]) {
+              onOpenJob(found[sel].job.id);
+            } else if (e.key === 'Escape' && query) {
+              e.stopPropagation();
+              setQuery('');
+            }
+          }}
+          placeholder="Search titles, instructions, folders and reports · ↑↓ Enter"
+          aria-label="search jobs"
+          // biome-ignore lint/a11y/noAutofocus: the view exists to type a search
+          autoFocus
+        />
+      </div>
       <ul className="board">
         {found.map((j, i) => (
           <li key={j.job.id} data-selected={i === sel} className="history-row">

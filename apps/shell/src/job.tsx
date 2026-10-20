@@ -213,6 +213,7 @@ function ReportCard({ state, act }: { state: JobState; act: Act }) {
     );
   return (
     <section className="report" data-status={state.status} data-testid="report">
+      <h3 className="label report-head">report</h3>
       {r.needs_you.length > 0 && (
         <div className="needs-you-block">
           <h3 className="label">needs you</h3>
@@ -292,38 +293,71 @@ export function JobView({
   const timing = active
     ? duration(now - state.job.createdAt)
     : state.finishedAt
-      ? `took ${duration(state.finishedAt - state.job.createdAt)}`
-      : '';
+      ? duration(state.finishedAt - state.job.createdAt)
+      : '—';
   const cwd = shortPath(state.job.cwd, home);
   return (
     <div className="job-view">
-      <div className="meta">
+      <div className="crumbs">
         <button type="button" className="link" onClick={onBack} aria-keyshortcuts="Escape">
           ← back{' '}
           <span className="kbd" aria-hidden="true">
             esc
           </span>
         </button>
-        <span className="job-status" data-status={state.status}>
-          {statusLabel(state)}
+        <span className="crumbs-path" aria-hidden="true">
+          jobs / {id.slice(0, 8)}
         </span>
-        <span>{timing}</span>
-        <span>started {clock(state.job.createdAt)}</span>
-        {state.retryOf && (
-          <button type="button" className="link" onClick={() => onOpenJob(state.retryOf as string)}>
-            retry of {state.retryOf}
-          </button>
-        )}
       </div>
       <h1>{state.job.title}</h1>
       <p className="asked">
         <span className="muted">You asked:</span> {state.job.spec.prompt}
       </p>
-      <p className="path" title={state.job.cwd}>
-        {/* LRM keeps a leading / or ~ in place inside the right-to-left ellipsis box. */}
-        <bdi>{`\u200e${cwd}`}</bdi>
-        {state.job.branch && <span> · branch {state.job.branch}</span>}
-      </p>
+      <dl className="meta">
+        <div>
+          <dt>status</dt>
+          <dd>
+            <span className="job-status" data-status={state.status}>
+              {statusLabel(state)}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>{active ? 'running for' : 'took'}</dt>
+          <dd>{timing}</dd>
+        </div>
+        <div>
+          <dt>started</dt>
+          <dd>{clock(state.job.createdAt)}</dd>
+        </div>
+        <div className="meta-grow">
+          <dt>folder</dt>
+          <dd className="path" title={state.job.cwd}>
+            {/* LRM keeps a leading / or ~ in place inside the right-to-left ellipsis box. */}
+            <bdi>{`\u200e${cwd}`}</bdi>
+          </dd>
+        </div>
+        {state.job.branch && (
+          <div>
+            <dt>branch</dt>
+            <dd>{state.job.branch}</dd>
+          </div>
+        )}
+        {state.retryOf && (
+          <div>
+            <dt>origin</dt>
+            <dd>
+              <button
+                type="button"
+                className="link"
+                onClick={() => onOpenJob(state.retryOf as string)}
+              >
+                retry of {state.retryOf}
+              </button>
+            </dd>
+          </div>
+        )}
+      </dl>
       {state.status === 'failed' && (
         <p className="stopped" data-status="failed">
           Stopped: {state.error ?? 'the job failed'}
