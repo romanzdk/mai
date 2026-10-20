@@ -1,11 +1,11 @@
 import { type Query, query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Job } from '@mai/protocol';
+import type { Job, Report } from '@mai/protocol';
 import { type DeskOutput, parseDeskOutput, visibleReply } from './parse';
 import { DESK_MODEL, ISOLATED, sdkEnv } from './sdk';
 
 const SYSTEM_PROMPT = `You are the front desk of mai, a personal AI shell on the user's computer. The user types or dictates requests. You reply fast and hand real work to background workers.
 
-Workers are Claude agents with shell, file and web access on this machine. They run in the background and report back when done.
+Workers are Claude agents with shell, file and browser access on this machine. They run in the background and report back when done. For work in an existing project folder, set "cwd" to it; git projects get their own branch and are never pushed.
 
 How to respond:
 - Simple things (time, date, arithmetic, job status, questions about finished reports): answer yourself in one or two short sentences.
@@ -24,13 +24,26 @@ Each user message starts with a <context> block written by mai (not the user) wi
 
 export interface DeskContext {
   now: Date;
+  // The job the user is asking a follow-up about.
+  about?: { job: Job; report?: Report; lines: string[] };
   jobs: Pick<Job, 'id' | 'title' | 'status'>[];
   reports: { jobId: string; title: string; summary: string; needs_you: string[] }[];
 }
 
 export type DeskResult = DeskOutput;
 
-function contextBlock({ now, jobs, reports }: DeskContext): string {
+function aboutBlock({ job, report, lines }: NonNullable<DeskContext['about']>): string {
+  return [
+    `This message is a follow-up about job ${job.id} "${job.title}" [${job.status}].`,
+    `Its folder: ${job.cwd}${job.branch ? ` (git worktree of ${job.project}, branch ${job.branch})` : ''}`,
+    `Its instructions: ${job.spec.prompt}`,
+    report ? `Its report: ${JSON.stringify(report)}` : 'No report yet.',
+    `Its last steps:\n${lines.map((l) => `- ${l}`).join('\n') || '- none'}`,
+    `For more work on it, dispatch with "cwd": "${job.cwd}".`,
+  ].join('\n');
+}
+
+function contextBlock({ now, jobs, reports, about }: DeskContext): string {
   const time = now.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' });
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const jobLines = jobs.map((j) => `- ${j.id} [${j.status}] ${j.title}`).join('\n') || '- none';
@@ -41,7 +54,7 @@ function contextBlock({ now, jobs, reports }: DeskContext): string {
           `- ${r.jobId} ${r.title}: ${r.summary}${r.needs_you.length ? ` (needs you: ${r.needs_you.join('; ')})` : ''}`,
       )
       .join('\n') || '- none';
-  return `<context>\nLocal time: ${time} (${zone})\nJobs:\n${jobLines}\nRecent reports:\n${reportLines}\n</context>`;
+  return `<context>\nLocal time: ${time} (${zone})\nJobs:\n${jobLines}\nRecent reports:\n${reportLines}${about ? `\n${aboutBlock(about)}` : ''}\n</context>`;
 }
 
 interface Turn {

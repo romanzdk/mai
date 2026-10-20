@@ -4,10 +4,11 @@ A personal AI shell for macOS and Ubuntu. You type or say what you want; a fast 
 answers or hands the work to background Claude workers, and every job ends with a short report.
 It runs full-screen on top of your normal OS. It is not a kernel or a distro.
 
-Status: **M3 safety and parallelism** — type a request; the front desk answers or dispatches
-background workers (two at a time). Deletes outside a job's folder, sudo and git push pause the
-job behind an approval card. Jobs can be cancelled and retried; the inbox collects everything
-waiting for you. See [docs/SPEC.md](docs/SPEC.md)
+Status: **M4 vertical slice done** — type a request; the front desk answers or dispatches
+background workers (two at a time) with shell, file and browser access. Jobs in a git repo work
+on their own branch and never push. Deletes outside a job's folder, sudo, git push and web
+actions that buy or send something pause behind an approval card. Jobs can be cancelled,
+retried, asked about, and searched. See [docs/SPEC.md](docs/SPEC.md)
 for the plan.
 
 ## Install and run
@@ -19,7 +20,8 @@ also the [Tauri system packages](https://v2.tauri.app/start/prerequisites/#linux
 git clone <this repo> mai && cd mai && pnpm install && pnpm dev
 ```
 
-`pnpm install` downloads a pinned Node 24 binary that the app ships as its daemon sidecar.
+`pnpm install` downloads a pinned Node 24 binary (the daemon sidecar) and the Chromium build the
+workers' browser uses.
 
 `Cmd/Ctrl+Shift+Space` shows or hides the window. The tray icon has Show/Hide and Quit.
 

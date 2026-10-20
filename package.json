@@ -7,7 +7,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "postinstall": "node scripts/fetch-node.mjs",
+    "postinstall": "node scripts/fetch-node.mjs && node scripts/fetch-browser.mjs",
     "dev": "pnpm --filter @mai/daemon build && pnpm --filter @mai/shell tauri dev",
     "build": "pnpm --filter @mai/daemon build && pnpm --filter @mai/shell tauri build",
     "lint": "biome check .",

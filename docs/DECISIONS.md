@@ -153,3 +153,34 @@ status every 3 s for up to 10 min. No in-app terminal emulator, no native pty mo
 Started from Finder or the dock, the app inherits launchd's short PATH. The daemon reads
 `$SHELL -ilc` once at start (5 s timeout) and uses that PATH, so workers find Homebrew, nvm,
 cargo and the like.
+
+## 023 — Browser hands: Playwright MCP, isolated, headed (2026-10-20)
+
+Each worker gets its own `@playwright/mcp` server (Chromium, `--isolated` in-memory profile, so
+no cookies or logins of the user's). It runs headed by default: headless Chromium got a
+Cloudflare 403 on alza.cz, the headed one passed. `MAI_BROWSER_HEADLESS=1` hides it.
+`pnpm install` downloads the matching Chromium (skipped in CI).
+
+## 024 — Web actions that need approval (2026-10-20)
+
+`browser_click/type/fill_form/select_option/check` ask when the worker's own element
+description looks like buying, sending, submitting, confirming or deleting (English and Czech
+stems), or when typed text is submitted outside a search box. `browser_evaluate`,
+`browser_run_code_unsafe` (arbitrary page code) and `browser_file_upload` always ask. Workers are
+told to read pages with `browser_snapshot`. Ceiling: judged from descriptions, not the page.
+
+## 025 — Git project jobs run in a worktree on `mai/<job id>` (2026-10-20)
+
+A job whose `cwd` is a git repo gets `git worktree add -b mai/<id> ~/mai/jobs/<id>/<repo> HEAD`.
+The user's checkout is never touched, uncommitted local changes are not included, and jobs on
+the same repo run side by side. The worker commits there and never pushes (push needs
+approval). A follow-up job on that job's folder branches from the previous job's branch.
+Worktrees are left in place for review; cleanup is manual for now. Workers must not disable
+commit signing: if signing fails they leave changes uncommitted.
+
+## 026 — Follow-ups and history search (2026-10-20)
+
+"Ask follow-up" sends the next input with `aboutJobId`; the desk then sees that job's
+instructions, folder, branch, report and last 15 steps, and dispatches more work into the same
+folder. History search filters all jobs client-side (title, instructions, folder, branch,
+report). ponytail: the UI loads every event on connect; page by job when that gets slow.

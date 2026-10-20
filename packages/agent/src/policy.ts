@@ -11,45 +11,71 @@ export interface PolicyContext {
   jobDir?: string;
 }
 
+type Input = Record<string, unknown>;
+
 interface Rule {
   id: string;
-  tool: string;
-  pattern: RegExp;
+  tools: string[];
   reason: string;
+  matches: (input: Input) => boolean;
 }
 
+const str = (v: unknown) => (typeof v === 'string' ? v : '');
+
+const bash = (id: string, pattern: RegExp, reason: string): Rule => ({
+  id,
+  tools: ['Bash'],
+  reason,
+  matches: (i) => pattern.test(str(i.command)),
+});
+
+const web = (name: string) => `mcp__playwright__browser_${name}`;
+
+// What a page element is about to do, judged from the worker's own description of it. Czech
+// stems too, since the owner's sites often are.
+const RISKY_WEB_ACTION =
+  /\b(buy|pay|purchase|checkout|check out|order|send|submit|post|publish|delete|remove|confirm|subscribe|sign up|transfer|donate|book|reserve)\b|koupi|objedn|zaplat|odesl|potvr|smaz/i;
+
+const webTarget = (i: Input) =>
+  [
+    str(i.element),
+    ...(Array.isArray(i.fields) ? i.fields.map((f: Input) => str(f?.name)) : []),
+  ].join(' ');
+
 // Matching is deliberately broad: a false positive costs one approval, a false negative can
-// cost data. ponytail: regex screen over shell text, not a shell parser; move to a real parser
-// (or sandboxed execution) if workers start writing deletes these miss.
+// cost data. ponytail: regex screen over shell text and element descriptions, not a shell
+// parser or page model; move to a real parser (or sandboxed execution) if workers start
+// writing actions these miss.
 const DELETE_PATTERN = /(^|[\s;&|(`])(rm|rmdir|unlink|shred|srm|trash)(\s|$)/;
 
 export const RULES: Rule[] = [
-  { id: 'sudo', tool: 'Bash', pattern: /(^|[\s;&|(`])(sudo|doas|su)\s/, reason: 'runs as root' },
+  bash('sudo', /(^|[\s;&|(`])(sudo|doas|su)\s/, 'runs as root'),
+  bash('delete', DELETE_PATTERN, 'deletes files'),
+  bash('find-delete', /\bfind\b[^;&|]*\s-(delete|exec\s+rm)\b/, 'deletes files'),
+  bash('git-push', /\bgit\s+push\b/, 'pushes to a remote'),
+  bash('git-clean', /\bgit\s+clean\b/, 'deletes untracked files'),
+  bash('git-reset-hard', /\bgit\s+reset\s+--hard\b/, 'discards uncommitted work'),
+  bash('disk', /\b(mkfs|dd\s+if=|diskutil\s+erase)/, 'can wipe a disk'),
   {
-    id: 'delete',
-    tool: 'Bash',
-    pattern: DELETE_PATTERN,
-    reason: 'deletes files',
+    id: 'web-action',
+    tools: ['click', 'type', 'fill_form', 'select_option', 'check'].map(web),
+    reason: 'may buy, send or submit something on a website',
+    // Submitting typed text sends it somewhere, unless it is clearly a search.
+    matches: (i) =>
+      RISKY_WEB_ACTION.test(webTarget(i)) ||
+      (i.submit === true && !/search|hled|query|filter/i.test(str(i.element))),
   },
   {
-    id: 'find-delete',
-    tool: 'Bash',
-    pattern: /\bfind\b[^;&|]*\s-(delete|exec\s+rm)\b/,
-    reason: 'deletes files',
-  },
-  { id: 'git-push', tool: 'Bash', pattern: /\bgit\s+push\b/, reason: 'pushes to a remote' },
-  { id: 'git-clean', tool: 'Bash', pattern: /\bgit\s+clean\b/, reason: 'deletes untracked files' },
-  {
-    id: 'git-reset-hard',
-    tool: 'Bash',
-    pattern: /\bgit\s+reset\s+--hard\b/,
-    reason: 'discards uncommitted work',
+    id: 'web-code',
+    tools: ['evaluate', 'run_code_unsafe'].map(web),
+    reason: 'runs code inside a web page',
+    matches: () => true,
   },
   {
-    id: 'disk',
-    tool: 'Bash',
-    pattern: /\b(mkfs|dd\s+if=|diskutil\s+erase)/,
-    reason: 'can wipe a disk',
+    id: 'web-upload',
+    tools: [web('file_upload')],
+    reason: 'uploads files from your computer to a website',
+    matches: () => true,
   },
 ];
 
@@ -95,16 +121,25 @@ function deletesOnlyInside(command: string, ctx: PolicyContext): boolean {
   return true;
 }
 
-function commandOf(tool: string, input: unknown): string {
-  return tool === 'Bash' && typeof input === 'object' && input !== null
-    ? String((input as { command?: unknown }).command ?? '')
-    : '';
+// What the approval card shows: the exact shell command, or the web action and its target.
+function describe(tool: string, i: Input): string {
+  if (tool === 'Bash') return str(i.command);
+  const name = tool.replace('mcp__playwright__browser_', 'browser ');
+  const detail = [
+    webTarget(i).trim(),
+    str(i.text) && `text: ${str(i.text)}`,
+    str(i.function) || str(i.code),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return detail ? `${name}: ${detail}` : `${name}: ${JSON.stringify(i)}`;
 }
 
 export function checkToolUse(tool: string, input: unknown, ctx: PolicyContext): PolicyDecision {
-  const command = commandOf(tool, input);
-  const hits = RULES.filter((r) => r.tool === tool && r.pattern.test(command));
+  const i = (typeof input === 'object' && input !== null ? input : {}) as Input;
+  const hits = RULES.filter((r) => r.tools.includes(tool) && r.matches(i));
   if (hits.length === 0) return { allow: true };
+  const command = describe(tool, i);
   if (hits.every((r) => r.id === 'delete') && deletesOnlyInside(command, ctx))
     return { allow: true };
   const rule = hits[0] as Rule;

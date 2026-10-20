@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 type Msg<T extends string, P = object> = { v: typeof PROTOCOL_VERSION; type: T } & P;
 
@@ -27,6 +27,9 @@ export interface Job {
   cwd: string;
   createdAt: number;
   finishedAt: number | null;
+  // Git project jobs run in a worktree (cwd) of `project` on `branch`.
+  project?: string;
+  branch?: string;
 }
 
 export interface Report {
@@ -37,7 +40,7 @@ export interface Report {
 }
 
 export type EventBody =
-  | { kind: 'user_input'; text: string; inputId: string }
+  | { kind: 'user_input'; text: string; inputId: string; aboutJobId?: string }
   | { kind: 'desk_reply'; text: string; inputId: string; jobIds: string[] }
   | { kind: 'desk_error'; message: string; inputId: string }
   | { kind: 'job_created'; job: Job; retryOf?: string }
@@ -69,7 +72,7 @@ export type MaiEvent = EventBody & { id: number; ts: number; jobId: string | nul
 export type ClientMessage =
   | Msg<'ping', { id: string; t: number }>
   | Msg<'subscribe', { since: number }>
-  | Msg<'input', { inputId: string; text: string }>
+  | Msg<'input', { inputId: string; text: string; aboutJobId?: string }>
   | Msg<'approve', { approvalId: string; remember: boolean }>
   | Msg<'deny', { approvalId: string }>
   | Msg<'cancel', { jobId: string }>

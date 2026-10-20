@@ -83,3 +83,27 @@ test('the inbox lists pending approvals', async ({ page }) => {
   await card.getByRole('button', { name: 'Deny', exact: true }).click();
   await expect(card).toHaveCount(0);
 });
+
+test('ask a follow-up about a finished job', async ({ page }) => {
+  const row = await dispatch(page, 'job followup-target');
+  await expect(row).toContainText('done');
+  await row.click();
+  await page.getByRole('button', { name: 'Ask follow-up', exact: true }).click();
+  await expect(page.getByTestId('about-chip')).toContainText('job followup-target');
+  await page.getByLabel('request').fill('what changed?');
+  await page.getByLabel('request').press('Enter');
+  await expect(page.getByTestId('conversation')).toContainText(
+    'about job followup-target · what changed?',
+  );
+  await expect(page.getByTestId('about-chip')).toHaveCount(0);
+});
+
+test('history search finds old jobs by any word', async ({ page }) => {
+  await expect(await dispatch(page, 'job history-alpha')).toContainText('done');
+  await expect(await dispatch(page, 'job history-beta')).toContainText('done');
+  await page.getByRole('button', { name: 'history', exact: true }).click();
+  await page.getByLabel('search jobs').fill('history-beta');
+  const results = page.getByTestId('history').getByRole('button', { name: /history-/ });
+  await expect(results).toHaveCount(1);
+  await expect(results).toContainText('history-beta');
+});

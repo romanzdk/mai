@@ -20,6 +20,8 @@ Personal AI shell (spec: `docs/SPEC.md`, working name there is Helm). Decisions:
 - Approvals: worker `PreToolUse` hook → `Core.requestApproval` → job `waiting_approval` → UI card
   → `approve`/`deny` message → `Core.decide` resolves the waiting hook. Cancel/retry/dismiss are
   `Core` methods too. Voice (M2) is skipped.
+- Workers get a Playwright MCP browser (`browser.ts`); git project jobs run in a worktree on
+  branch `mai/<id>`; follow-ups carry `aboutJobId` into the desk context.
 
 All model calls go through `@anthropic-ai/claude-agent-sdk`. Never read, store or proxy OAuth
 tokens; never call the Messages API directly.
@@ -38,7 +40,8 @@ In Claude Code's Bash on the owner's Mac, `node`/`npm` are broken nvm shell func
 `unset -f node npm npx nvm; export PATH=$HOME/.nvm/versions/node/v24.21.0/bin:$PATH`.
 
 Daemon env: `MAI_TOKEN` (required), `MAI_PORT`, `MAI_DATA_DIR`, `MAI_DB`, `MAI_WORKSPACE`
-(default `~/mai`), `MAI_MAX_PARALLEL` (2), `MAI_API_KEY_MODE=1`, `MAI_FAKE_AGENT=1` (no model calls).
+(default `~/mai`), `MAI_MAX_PARALLEL` (2), `MAI_API_KEY_MODE=1`, `MAI_BROWSER_HEADLESS=1`,
+`MAI_FAKE_AGENT=1` (no model calls).
 
 ## Conventions
 

@@ -1,6 +1,6 @@
 import type { EventBody, Job, MaiEvent } from '@mai/protocol';
 import { expect, test } from 'vitest';
-import { derive } from './derive';
+import { derive, searchJobs } from './derive';
 
 let id = 0;
 const ev = (jobId: string | null, body: EventBody): MaiEvent => ({
@@ -88,4 +88,30 @@ test('pending approvals and needs-you reports make up the inbox', () => {
     ev('j2', { kind: 'inbox_dismissed' }),
   ]);
   expect(after.needsYou).toEqual([]);
+});
+
+test('history search matches every word across title, prompt and report', () => {
+  const report = {
+    summary: 'Cheapest is Samsung 990',
+    changes: [],
+    artifacts: ['/x/nvme.md'],
+    needs_you: [],
+  };
+  const { jobs } = derive([
+    ev('j1', {
+      kind: 'job_created',
+      job: { ...job, title: 'NVMe prices', spec: { title: 't', prompt: 'alza.cz' } },
+    }),
+    ev('j1', { kind: 'job_report', report }),
+    ev('j2', {
+      kind: 'job_created',
+      job: { ...job, id: 'j2', title: 'CI workflow', branch: 'mai/j2' },
+    }),
+  ]);
+  const ids = (q: string) => searchJobs(jobs, q).map((j) => j.job.id);
+  expect(ids('')).toHaveLength(2);
+  expect(ids('samsung alza')).toEqual(['j1']);
+  expect(ids('NVME.MD')).toEqual(['j1']);
+  expect(ids('mai/j2')).toEqual(['j2']);
+  expect(ids('samsung workflow')).toEqual([]);
 });

@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS jobs (
   model TEXT NOT NULL,
   cwd TEXT NOT NULL,
   created_at INTEGER NOT NULL,
-  finished_at INTEGER
+  finished_at INTEGER,
+  project TEXT,
+  branch TEXT
 );
 CREATE TABLE IF NOT EXISTS approvals (
   id TEXT PRIMARY KEY,
@@ -30,6 +32,7 @@ CREATE TABLE IF NOT EXISTS approvals (
   created_at INTEGER NOT NULL,
   decided_at INTEGER
 );
+CREATE INDEX IF NOT EXISTS events_job ON events (job_id);
 CREATE TABLE IF NOT EXISTS reports (
   job_id TEXT PRIMARY KEY REFERENCES jobs(id),
   body TEXT NOT NULL,
@@ -46,6 +49,8 @@ interface JobRow {
   cwd: string;
   created_at: number;
   finished_at: number | null;
+  project: string | null;
+  branch: string | null;
 }
 
 const toJob = (r: JobRow): Job => ({
@@ -57,7 +62,15 @@ const toJob = (r: JobRow): Job => ({
   cwd: r.cwd,
   createdAt: r.created_at,
   finishedAt: r.finished_at,
+  ...(r.project ? { project: r.project } : {}),
+  ...(r.branch ? { branch: r.branch } : {}),
 });
+
+// Columns added after a release; CREATE TABLE IF NOT EXISTS does not add them to old files.
+const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
+  ['jobs', 'project', 'TEXT'],
+  ['jobs', 'branch', 'TEXT'],
+];
 
 export class Store {
   private db: DatabaseSync;
@@ -65,6 +78,12 @@ export class Store {
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec(SCHEMA);
+    for (const [table, column, type] of ADDED_COLUMNS) {
+      const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+      if (!cols.some((c) => c.name === column)) {
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      }
+    }
   }
 
   appendEvent(jobId: string | null, body: EventBody): MaiEvent {
@@ -76,16 +95,32 @@ export class Store {
   }
 
   eventsSince(id: number): MaiEvent[] {
-    const rows = this.db
-      .prepare('SELECT id, ts, job_id, body FROM events WHERE id > ? ORDER BY id')
-      .all(id) as { id: number; ts: number; job_id: string | null; body: string }[];
-    return rows.map((r) => ({ ...JSON.parse(r.body), id: r.id, ts: r.ts, jobId: r.job_id }));
+    return this.toEvents(
+      this.db.prepare('SELECT id, ts, job_id, body FROM events WHERE id > ? ORDER BY id').all(id),
+    );
+  }
+
+  jobEvents(jobId: string): MaiEvent[] {
+    return this.toEvents(
+      this.db
+        .prepare('SELECT id, ts, job_id, body FROM events WHERE job_id = ? ORDER BY id')
+        .all(jobId),
+    );
+  }
+
+  private toEvents(rows: unknown[]): MaiEvent[] {
+    return (rows as { id: number; ts: number; job_id: string | null; body: string }[]).map((r) => ({
+      ...JSON.parse(r.body),
+      id: r.id,
+      ts: r.ts,
+      jobId: r.job_id,
+    }));
   }
 
   insertJob(job: Job): void {
     this.db
       .prepare(
-        'INSERT INTO jobs (id, title, spec, status, model, cwd, created_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO jobs (id, title, spec, status, model, cwd, created_at, finished_at, project, branch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
       .run(
         job.id,
@@ -96,6 +131,8 @@ export class Store {
         job.cwd,
         job.createdAt,
         job.finishedAt,
+        job.project ?? null,
+        job.branch ?? null,
       );
   }
 
@@ -152,6 +189,13 @@ export class Store {
     this.db
       .prepare('INSERT OR REPLACE INTO reports (job_id, body, created_at) VALUES (?, ?, ?)')
       .run(jobId, JSON.stringify(report), Date.now());
+  }
+
+  report(jobId: string): Report | undefined {
+    const row = this.db.prepare('SELECT body FROM reports WHERE job_id = ?').get(jobId) as
+      | { body: string }
+      | undefined;
+    return row ? JSON.parse(row.body) : undefined;
   }
 
   recentReports(limit: number): { jobId: string; title: string; report: Report }[] {

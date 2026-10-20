@@ -20,6 +20,7 @@ export interface Exchange {
   reply?: string;
   error?: string;
   jobIds: string[];
+  aboutJobId?: string;
 }
 
 export const ACTIVE: JobStatus[] = ['queued', 'running', 'waiting_approval', 'waiting_input'];
@@ -58,7 +59,13 @@ export function derive(events: MaiEvent[]): Derived {
 
   for (const e of events) {
     if (e.kind === 'user_input') {
-      exchanges.set(e.inputId, { inputId: e.inputId, text: e.text, ts: e.ts, jobIds: [] });
+      exchanges.set(e.inputId, {
+        inputId: e.inputId,
+        text: e.text,
+        ts: e.ts,
+        jobIds: [],
+        ...(e.aboutJobId ? { aboutJobId: e.aboutJobId } : {}),
+      });
       continue;
     }
     if (e.kind === 'desk_reply' || e.kind === 'desk_error') {
@@ -111,4 +118,26 @@ export function derive(events: MaiEvent[]): Derived {
       (j) => !ACTIVE.includes(j.status) && !j.dismissed && (j.report?.needs_you.length ?? 0) > 0,
     ),
   };
+}
+
+// Every word must appear somewhere in the job's title, instructions, folder, branch or report.
+export function searchJobs(jobs: JobState[], query: string): JobState[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return jobs;
+  return jobs.filter((j) => {
+    const r = j.report;
+    const haystack = [
+      j.job.title,
+      j.job.spec.prompt,
+      j.job.cwd,
+      j.job.branch,
+      j.status,
+      r?.summary,
+      ...(r?.changes ?? []),
+      ...(r?.artifacts ?? []),
+    ]
+      .join('\n')
+      .toLowerCase();
+    return words.every((w) => haystack.includes(w));
+  });
 }

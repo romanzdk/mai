@@ -1,5 +1,6 @@
 import { type HookCallback, query } from '@anthropic-ai/claude-agent-sdk';
 import type { JobSpec } from '@mai/protocol';
+import { playwrightServer } from './browser';
 import { checkToolUse } from './policy';
 import { ISOLATED, sdkEnv } from './sdk';
 
@@ -13,8 +14,11 @@ export interface WorkerArgs {
   model: string;
   home: string;
   apiKeyMode: boolean;
-  // The job's own workspace folder; absent for project jobs.
+  headedBrowser: boolean;
+  // The job's own workspace folder; absent for plain (non-git) project folders.
   jobDir?: string;
+  // Set when the job works in a git worktree made for it.
+  git?: { project: string; branch: string };
   signal: AbortSignal;
   onEvent: (e: WorkerEvent) => void;
   // Resolves when the user decides; the worker session waits inside the hook meanwhile.
@@ -46,24 +50,35 @@ const ALLOWED_TOOLS = [
   'WebSearch',
   'WebFetch',
   'Agent',
+  'mcp__playwright',
 ];
 
-const appendPrompt = (home: string, jobDir?: string) => `
-You are a mai worker: you run in the background for the user, who is not watching. Work on your own; nobody can answer questions mid-task. The user's home directory is ${home}.${jobDir ? `\nYour job folder is ${jobDir}. Deleting files inside it needs no approval if you use absolute paths without globs, quotes or variables.` : ''}
-Deleting files elsewhere, sudo, and git push/clean/reset --hard pause for the user's approval; the call simply waits until they decide.
+const appendPrompt = ({ home, jobDir, git }: Pick<WorkerArgs, 'home' | 'jobDir' | 'git'>) => `
+You are a mai worker: you run in the background for the user, who is not watching. Work on your own; nobody can answer questions mid-task. The user's home directory is ${home}.${jobDir ? `\nYour job folder is ${jobDir}. Deleting files inside it needs no approval if you use absolute paths without globs, quotes or variables.` : ''}${git ? `\nYou are in a git worktree of ${git.project}, on branch ${git.branch} made for this job. Commit your work on this branch with conventional commit messages. Never push and never switch branches; the user reviews the branch. The user's own checkout is untouched. If a commit fails (for example commit signing), never disable signing or hooks; leave the changes uncommitted and say so.` : ''}
+For websites, use the browser tools (mcp__playwright__*): a fresh browser with no logins. Prefer it over WebFetch for shops and other dynamic pages. Read pages with browser_snapshot; browser_evaluate and browser_run_code_unsafe need the user's approval.
+Deleting files elsewhere, sudo, git push/clean/reset --hard, and web actions that buy, send or submit something pause for the user's approval; the call simply waits until they decide.
 If the user denies a call, do not try to get around it; stop and say what you could not do.
 If finishing really needs a decision from the user, stop and state exactly what you need in your final message.
 End with a short plain summary of what you did and where the results are.`;
 
 export function summarizeToolInput(input: unknown): string {
   const i = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
-  const pick = i.command ?? i.file_path ?? i.path ?? i.pattern ?? i.url ?? i.query ?? i.description;
+  const pick =
+    i.command ??
+    i.file_path ??
+    i.path ??
+    i.pattern ??
+    i.url ??
+    i.query ??
+    i.element ??
+    i.description;
   const text = typeof pick === 'string' ? pick : JSON.stringify(input);
   return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
 
 export async function runWorker(args: WorkerArgs): Promise<WorkerResult> {
-  const { spec, cwd, model, home, jobDir, apiKeyMode, signal, onEvent, requestApproval } = args;
+  const { spec, cwd, model, home, jobDir, git, apiKeyMode, signal, onEvent, requestApproval } =
+    args;
   const abortController = new AbortController();
   signal.addEventListener('abort', () => abortController.abort(), { once: true });
 
@@ -87,7 +102,13 @@ export async function runWorker(args: WorkerArgs): Promise<WorkerResult> {
     };
   };
 
-  const lines = [`TASK: ${spec.prompt}`];
+  // The report writer only sees this transcript, so tell it what is by design.
+  const lines = [
+    `TASK: ${spec.prompt}`,
+    git
+      ? `SETUP: mai ran this job in ${cwd}, a git worktree of ${git.project} on new branch ${git.branch}; committing there is expected, pushing is not allowed.`
+      : `SETUP: mai ran this job in ${cwd}.`,
+  ];
   const q = query({
     prompt: spec.prompt,
     options: {
@@ -96,7 +117,12 @@ export async function runWorker(args: WorkerArgs): Promise<WorkerResult> {
       cwd,
       abortController,
       tools: { type: 'preset', preset: 'claude_code' },
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: appendPrompt(home, jobDir) },
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: appendPrompt({ home, jobDir, ...(git ? { git } : {}) }),
+      },
+      mcpServers: { playwright: playwrightServer(jobDir ?? cwd, args.headedBrowser) },
       permissionMode: 'dontAsk',
       allowedTools: ALLOWED_TOOLS,
       // Jobs may read and write anywhere in ~ without approval (docs/DECISIONS.md 004).
@@ -121,7 +147,11 @@ export async function runWorker(args: WorkerArgs): Promise<WorkerResult> {
             lines.push(`ASSISTANT: ${block.text.trim()}`);
           } else if (block.type === 'tool_use') {
             const summary = summarizeToolInput(block.input);
-            onEvent({ kind: 'tool', tool: block.name, summary });
+            onEvent({
+              kind: 'tool',
+              tool: block.name.replace('mcp__playwright__browser_', 'browser '),
+              summary,
+            });
             lines.push(`TOOL ${block.name}: ${summary}`);
           }
         }

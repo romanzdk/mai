@@ -7,11 +7,16 @@ import {
   derive,
   type Exchange,
   type JobState,
+  searchJobs,
   timelineLine,
 } from './derive';
 
 type Act = (msg: Action) => void;
-type View = { name: 'home' } | { name: 'inbox' } | { name: 'job'; id: string };
+type View =
+  | { name: 'home' }
+  | { name: 'inbox' }
+  | { name: 'history' }
+  | { name: 'job'; id: string };
 
 const useNow = (ms: number) => {
   const [now, setNow] = useState(Date.now());
@@ -28,10 +33,12 @@ function StatusLine({
   connection,
   inboxCount,
   onInbox,
+  onHistory,
 }: {
   connection: Connection;
   inboxCount: number;
   onInbox: () => void;
+  onHistory: () => void;
 }) {
   const now = useNow(1000);
   return (
@@ -49,6 +56,9 @@ function StatusLine({
           {connection.rtt !== undefined && <span>rtt {connection.rtt} ms</span>}
         </>
       )}
+      <button type="button" className="link history-link" onClick={onHistory}>
+        history
+      </button>
       <button
         type="button"
         className="link inbox-link"
@@ -171,11 +181,13 @@ function JobView({
   act,
   onBack,
   onOpenJob,
+  onFollowUp,
 }: {
   state: JobState;
   act: Act;
   onBack: () => void;
   onOpenJob: (id: string) => void;
+  onFollowUp: () => void;
 }) {
   const id = state.job.id;
   const active = ACTIVE.includes(state.status);
@@ -190,6 +202,7 @@ function JobView({
           {statusLabel(state.status)}
         </span>
         <span className="muted mono">{state.job.cwd}</span>
+        {state.job.branch && <span className="mono">branch {state.job.branch}</span>}
         {state.retryOf && (
           <button type="button" className="link" onClick={() => onOpenJob(state.retryOf as string)}>
             retry of {state.retryOf}
@@ -220,6 +233,9 @@ function JobView({
           onClick={() => act({ type: 'open_folder', jobId: id })}
         >
           Open folder
+        </button>
+        <button type="button" className="button" onClick={onFollowUp}>
+          Ask follow-up
         </button>
       </div>
       {state.pendingApprovals.map((a) => (
@@ -300,14 +316,56 @@ function InboxView({
   );
 }
 
+function HistoryView({
+  jobs,
+  onBack,
+  onOpenJob,
+}: {
+  jobs: JobState[];
+  onBack: () => void;
+  onOpenJob: (id: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const found = searchJobs(jobs, query);
+  return (
+    <div className="job-view" data-testid="history">
+      <div className="job-view-head">
+        <button type="button" className="link" onClick={onBack}>
+          ← back (esc)
+        </button>
+        <h2>History</h2>
+        <span className="muted">
+          {found.length} of {jobs.length} jobs
+        </span>
+      </div>
+      <input
+        className="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search titles, instructions, folders and reports"
+        aria-label="search jobs"
+        // biome-ignore lint/a11y/noAutofocus: the view exists to type a search
+        autoFocus
+      />
+      <section className="board">
+        {found.map((j) => (
+          <JobRow key={j.job.id} state={j} onOpen={() => onOpenJob(j.job.id)} />
+        ))}
+      </section>
+    </div>
+  );
+}
+
 function Conversation({
   exchanges,
   deltas,
   pending,
+  titles,
 }: {
   exchanges: Exchange[];
   deltas: Record<string, string>;
   pending: { inputId: string; text: string }[];
+  titles: Map<string, string>;
 }) {
   const items = [
     ...exchanges.slice(-6),
@@ -317,7 +375,12 @@ function Conversation({
     <div className="conversation" data-testid="conversation">
       {items.map((ex) => (
         <div key={ex.inputId} className="exchange">
-          <div className="you">{ex.text}</div>
+          <div className="you">
+            {ex.aboutJobId && (
+              <span className="about">about {titles.get(ex.aboutJobId) ?? ex.aboutJobId} · </span>
+            )}
+            {ex.text}
+          </div>
           <div className="desk">
             {ex.error ? (
               <span className="error">{ex.error}</span>
@@ -331,10 +394,21 @@ function Conversation({
   );
 }
 
-function InputBar({ onSend, disabled }: { onSend: (text: string) => void; disabled: boolean }) {
+function InputBar({
+  onSend,
+  disabled,
+  about,
+  onClearAbout,
+}: {
+  onSend: (text: string) => void;
+  disabled: boolean;
+  about?: string;
+  onClearAbout: () => void;
+}) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => ref.current?.focus(), []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refocus when a follow-up starts
+  useEffect(() => ref.current?.focus(), [about]);
   return (
     <form
       className="input-bar"
@@ -345,11 +419,30 @@ function InputBar({ onSend, disabled }: { onSend: (text: string) => void; disabl
         setText('');
       }}
     >
+      {about && (
+        <div className="about-chip" data-testid="about-chip">
+          follow-up about {about}
+          <button
+            type="button"
+            className="link"
+            onClick={onClearAbout}
+            aria-label="clear follow-up"
+          >
+            ×
+          </button>
+        </div>
+      )}
       <input
         ref={ref}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={disabled ? 'waiting for the daemon…' : 'What do you want done?'}
+        placeholder={
+          disabled
+            ? 'waiting for the daemon…'
+            : about
+              ? 'Ask about this job'
+              : 'What do you want done?'
+        }
         aria-label="request"
         autoComplete="off"
         spellCheck={false}
@@ -362,6 +455,8 @@ export function App() {
   const { connection, events, deltas, pending, auth, send, act } = useDaemon();
   const { jobs, exchanges, approvals, needsYou } = useMemo(() => derive(events), [events]);
   const [view, setView] = useState<View>({ name: 'home' });
+  const [aboutJob, setAboutJob] = useState<string | undefined>();
+  const titles = useMemo(() => new Map(jobs.map((j) => [j.job.id, j.job.title])), [jobs]);
   const home = () => setView({ name: 'home' });
   const openJob = (id: string) => setView({ name: 'job', id });
   const open = view.name === 'job' ? jobs.find((j) => j.job.id === view.id) : undefined;
@@ -381,6 +476,7 @@ export function App() {
         connection={connection}
         inboxCount={approvals.length + needsYou.length}
         onInbox={() => setView({ name: 'inbox' })}
+        onHistory={() => setView({ name: 'history' })}
       />
       <main className="main">
         {view.name === 'inbox' ? (
@@ -391,8 +487,19 @@ export function App() {
             onBack={home}
             onOpenJob={openJob}
           />
+        ) : view.name === 'history' ? (
+          <HistoryView jobs={jobs} onBack={home} onOpenJob={openJob} />
         ) : open ? (
-          <JobView state={open} act={act} onBack={home} onOpenJob={openJob} />
+          <JobView
+            state={open}
+            act={act}
+            onBack={home}
+            onOpenJob={openJob}
+            onFollowUp={() => {
+              setAboutJob(open.job.id);
+              home();
+            }}
+          />
         ) : (
           <>
             {approvals.map(({ approval, job }) => (
@@ -416,12 +523,20 @@ export function App() {
                 <JobRow key={j.job.id} state={j} onOpen={() => openJob(j.job.id)} />
               ))}
             </section>
-            <Conversation exchanges={exchanges} deltas={deltas} pending={pending} />
+            <Conversation exchanges={exchanges} deltas={deltas} pending={pending} titles={titles} />
           </>
         )}
       </main>
       <LoginBanner auth={auth} act={act} />
-      <InputBar onSend={send} disabled={connection.status !== 'connected'} />
+      <InputBar
+        onSend={(text) => {
+          send(text, aboutJob);
+          setAboutJob(undefined);
+        }}
+        disabled={connection.status !== 'connected'}
+        {...(aboutJob ? { about: titles.get(aboutJob) ?? aboutJob } : {})}
+        onClearAbout={() => setAboutJob(undefined)}
+      />
     </div>
   );
 }

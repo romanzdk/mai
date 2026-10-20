@@ -44,7 +44,11 @@ const core = new Core({
   agent:
     env.MAI_FAKE_AGENT === '1'
       ? createFakeAgent()
-      : createAgent({ apiKeyMode: env.MAI_API_KEY_MODE === '1' }),
+      : createAgent({
+          apiKeyMode: env.MAI_API_KEY_MODE === '1',
+          // Headless Chromium gets bot-checked by Cloudflare-protected shops (alza.cz).
+          headedBrowser: env.MAI_BROWSER_HEADLESS !== '1',
+        }),
   workspace: env.MAI_WORKSPACE ?? join(home, 'mai'),
   home,
   maxParallel: Number(env.MAI_MAX_PARALLEL ?? 2),

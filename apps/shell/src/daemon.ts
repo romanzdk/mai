@@ -28,7 +28,7 @@ export interface Daemon {
   // Inputs sent but not yet echoed back as user_input events.
   pending: { inputId: string; text: string }[];
   auth: { state: AuthState; detail?: string };
-  send: (text: string) => void;
+  send: (text: string, aboutJobId?: string) => void;
   act: (msg: Action) => void;
 }
 
@@ -136,12 +136,20 @@ export function useDaemon(): Daemon {
     };
   }, []);
 
-  const send = useCallback((text: string) => {
+  const send = useCallback((text: string, aboutJobId?: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const inputId = crypto.randomUUID();
     setPending((p) => [...p, { inputId, text }]);
-    ws.send(encode({ v: PROTOCOL_VERSION, type: 'input', inputId, text }));
+    ws.send(
+      encode({
+        v: PROTOCOL_VERSION,
+        type: 'input',
+        inputId,
+        text,
+        ...(aboutJobId ? { aboutJobId } : {}),
+      }),
+    );
   }, []);
 
   const act = useCallback((msg: Action) => {

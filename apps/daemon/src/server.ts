@@ -68,7 +68,11 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
             msg.text.trim() &&
             msg.text.length <= MAX_INPUT_CHARS
           ) {
-            void core.handleInput(String(msg.inputId), msg.text.trim());
+            void core.handleInput(
+              String(msg.inputId),
+              msg.text.trim(),
+              typeof msg.aboutJobId === 'string' ? msg.aboutJobId : undefined,
+            );
           }
           break;
         case 'approve':

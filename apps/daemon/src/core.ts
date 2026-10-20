@@ -1,7 +1,8 @@
-import { spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { promisify } from 'node:util';
 import { type Agent, type ApprovalRequest, WORKER_MODEL } from '@mai/agent';
 import {
   type AuthState,
@@ -40,6 +41,17 @@ const LOGIN_POLL_MS = 3000;
 const LOGIN_TIMEOUT_MS = 10 * 60_000;
 
 const isDir = (path: string) => statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
+const run = promisify(execFile);
+
+function isGitRepo(dir: string): boolean {
+  if (!isDir(dir)) return false;
+  try {
+    execFileSync('git', ['-C', dir, 'rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
 const shortId = () => randomUUID().slice(0, 8);
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -101,11 +113,18 @@ export class Core {
     this.record(jobId, { kind: 'job_status', status, ...(error ? { error } : {}) });
   }
 
-  async handleInput(inputId: string, text: string): Promise<void> {
-    this.record(null, { kind: 'user_input', text, inputId });
+  async handleInput(inputId: string, text: string, aboutJobId?: string): Promise<void> {
     const { store } = this.opts;
+    const about = aboutJobId ? store.job(aboutJobId) : undefined;
+    this.record(about?.id ?? null, {
+      kind: 'user_input',
+      text,
+      inputId,
+      ...(about ? { aboutJobId: about.id } : {}),
+    });
     const ctx = {
       now: new Date(),
+      ...(about ? { about: this.aboutContext(about) } : {}),
       jobs: store.jobs(undefined, 20),
       reports: store.recentReports(5).map((r) => ({
         jobId: r.jobId,
@@ -142,17 +161,36 @@ export class Core {
     }
   }
 
+  private aboutContext(job: Job) {
+    const { store } = this.opts;
+    const report = store.report(job.id);
+    const lines = store.jobEvents(job.id).flatMap((e) => {
+      if (e.kind === 'job_tool') return [`${e.tool}: ${e.summary}`];
+      if (e.kind === 'job_text') return [e.text.slice(0, 500)];
+      return [];
+    });
+    return { job, ...(report ? { report } : {}), lines: lines.slice(-15) };
+  }
+
   private createJob(spec: JobSpec): Job {
     const id = shortId();
+    const jobDir = join(this.opts.workspace, 'jobs', id);
+    // A git project gets its own worktree and branch, so the user's checkout is never touched
+    // and jobs on the same repo can run side by side.
+    const git =
+      spec.cwd && isGitRepo(spec.cwd)
+        ? { project: spec.cwd, branch: `mai/${id}`, cwd: join(jobDir, basename(spec.cwd)) }
+        : undefined;
     const job: Job = {
       id,
       title: spec.title,
       spec,
       status: 'queued',
       model: spec.model ?? WORKER_MODEL,
-      cwd: spec.cwd ?? join(this.opts.workspace, 'jobs', id),
+      cwd: git?.cwd ?? spec.cwd ?? jobDir,
       createdAt: Date.now(),
       finishedAt: null,
+      ...(git ? { project: git.project, branch: git.branch } : {}),
     };
     this.opts.store.insertJob(job);
     return job;
@@ -280,7 +318,22 @@ export class Core {
     this.running.set(job.id, state);
     this.setStatus(job.id, 'running');
     try {
-      if (job.spec.cwd) {
+      const jobDir = join(this.opts.workspace, 'jobs', job.id);
+      if (job.project && job.branch) {
+        mkdirSync(jobDir, { recursive: true });
+        await run('git', [
+          '-C',
+          job.project,
+          'worktree',
+          'add',
+          '-b',
+          job.branch,
+          job.cwd,
+          'HEAD',
+        ]).catch((e: { stderr?: string }) => {
+          throw new Error(`could not create a git worktree: ${e.stderr?.trim() || message(e)}`);
+        });
+      } else if (job.spec.cwd) {
         if (!isDir(job.cwd)) throw new Error(`project folder does not exist: ${job.cwd}`);
       } else {
         mkdirSync(job.cwd, { recursive: true });
@@ -290,7 +343,8 @@ export class Core {
         cwd: job.cwd,
         model: job.model,
         home: this.opts.home,
-        ...(job.spec.cwd ? {} : { jobDir: job.cwd }),
+        ...(job.spec.cwd && !job.branch ? {} : { jobDir }),
+        ...(job.project && job.branch ? { git: { project: job.project, branch: job.branch } } : {}),
         signal: state.abort.signal,
         onEvent: (e) =>
           this.record(

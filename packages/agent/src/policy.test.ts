@@ -76,3 +76,47 @@ test('non-Bash tools are allowed', () => {
     allow: true,
   });
 });
+
+const browser = (name: string, input: object) =>
+  checkToolUse(`mcp__playwright__browser_${name}`, input, ctx);
+
+test.each([
+  ['click', { element: 'Buy now button', target: 'e12' }],
+  ['click', { element: 'Place order', target: 'e3' }],
+  ['click', { element: 'tlačítko Koupit', target: 'e3' }],
+  ['click', { element: 'Odeslat objednávku', target: 'e9' }],
+  ['type', { element: 'Message body', target: 'e4', text: 'hi', submit: true }],
+  ['type', { element: 'Send message box', target: 'e4', text: 'hi' }],
+  [
+    'fill_form',
+    {
+      fields: [
+        { name: 'Card number', type: 'textbox' },
+        { name: 'Pay', type: 'button' },
+      ],
+    },
+  ],
+  ['evaluate', { function: '() => document.forms[0].submit()' }],
+  ['run_code_unsafe', { code: 'await page.click("x")' }],
+  ['file_upload', { paths: ['/Users/me/secret.pdf'] }],
+])('web action needs approval: %s %j', (name, input) => {
+  expect(browser(name, input).allow).toBe(false);
+});
+
+test.each([
+  ['navigate', { url: 'https://www.alza.cz' }],
+  ['snapshot', {}],
+  ['click', { element: 'Sort by price, cheapest first', target: 'e5' }],
+  ['click', { element: 'Next page link', target: 'e7' }],
+  ['type', { element: 'Search box', target: 'e2', text: '1TB NVMe', submit: true }],
+  ['press_key', { key: 'Enter' }],
+])('web action allowed: %s %j', (name, input) => {
+  expect(browser(name, input)).toEqual({ allow: true });
+});
+
+test('the card shows what the web action targets', () => {
+  expect(browser('click', { element: 'Buy now button', target: 'e12' })).toMatchObject({
+    ruleId: 'web-action',
+    command: 'browser click: Buy now button',
+  });
+});

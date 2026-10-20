@@ -348,3 +348,40 @@ button {
 .needs-you .button {
   align-self: flex-start;
 }
+
+.history-link {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.history-link + .inbox-link {
+  margin-left: 0;
+}
+
+.search {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space) calc(var(--space) * 1.5);
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--accent);
+}
+
+.about,
+.about-chip {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.about-chip {
+  display: flex;
+  gap: var(--space);
+  margin-bottom: 4px;
+}
