@@ -218,3 +218,19 @@ test('status bar helpers: job counts, usage levels, reset labels', () => {
   expect(resetLabel(new Date(2026, 9, 24, 4, 0).toISOString(), now)).not.toBe('04:00');
   expect(resetLabel('garbage', now)).toBe('');
 });
+
+test('a finished scheduled run is a new report in the inbox until dismissed', () => {
+  const report = { summary: 'Brief', changes: [], artifacts: [], needs_you: [] };
+  const scheduled = { ...job, id: 's1', scheduleId: 'sch' };
+  const base = [
+    ev('s1', { kind: 'job_created', job: scheduled }),
+    ev('s1', { kind: 'job_report', report }),
+    ev('s1', { kind: 'job_status', status: 'done' }),
+  ];
+  const fresh = derive(base);
+  expect(fresh.needsYou.map((j) => j.job.id)).toEqual(['s1']);
+  expect(fresh.jobs[0] && statusLabel(fresh.jobs[0])).toBe('new report');
+  const read = derive([...base, ev('s1', { kind: 'inbox_dismissed' })]);
+  expect(read.needsYou).toEqual([]);
+  expect(read.jobs[0] && statusLabel(read.jobs[0])).toBe('done');
+});

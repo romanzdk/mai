@@ -5,6 +5,7 @@ import {
   encode,
   type MaiEvent,
   PROTOCOL_VERSION,
+  type Schedule,
   type ServerMessage,
   type Settings,
   type Usage,
@@ -48,6 +49,7 @@ export interface Daemon {
   settings: Settings | null;
   // Why new jobs are on hold, or null.
   paused: string | null;
+  schedules: Schedule[];
   // Requests queue until connected, so nothing typed or dictated is lost. Actions do not:
   // a late approve could act on stale state, so act returns false when it sent nothing.
   send: (text: string, aboutJobId?: string) => void;
@@ -75,6 +77,7 @@ export function useDaemon(): Daemon {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [paused, setPaused] = useState<string | null>(null);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const lastId = useRef(0);
   const outbox = useRef<ClientMessage[]>([]);
@@ -127,6 +130,8 @@ export function useDaemon(): Daemon {
           setSettings(msg.settings);
         } else if (msg?.type === 'scheduler') {
           setPaused(msg.paused);
+        } else if (msg?.type === 'schedules') {
+          setSchedules(msg.schedules);
         } else if (msg?.type === 'auth') {
           setAuth({ state: msg.state, ...(msg.detail ? { detail: msg.detail } : {}) });
         }
@@ -227,6 +232,7 @@ export function useDaemon(): Daemon {
     usage,
     settings,
     paused,
+    schedules,
     send,
     act,
     restart,

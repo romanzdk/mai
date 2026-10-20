@@ -309,6 +309,7 @@ export function JobView({
         </span>
         <span>{timing}</span>
         <span>started {clock(state.job.createdAt)}</span>
+        {state.job.scheduleId && <span>from a schedule</span>}
         {state.retryOf && (
           <button type="button" className="link" onClick={() => onOpenJob(state.retryOf as string)}>
             retry of {state.retryOf}

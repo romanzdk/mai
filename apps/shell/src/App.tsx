@@ -14,6 +14,7 @@ import {
   Notices,
   TopBar,
 } from './panels';
+import { SchedulesView } from './schedules';
 import { SettingsView } from './settings';
 import { isMod, SHORTCUT_KEYS, useNow } from './ui';
 
@@ -22,6 +23,7 @@ type View =
   | { name: 'inbox' }
   | { name: 'history' }
   | { name: 'settings' }
+  | { name: 'schedules' }
   | { name: 'job'; id: string };
 
 const HOME: View = { name: 'home' };
@@ -58,10 +60,12 @@ export function App() {
     usage,
     settings,
     paused,
+    schedules,
     send,
     act,
     restart,
   } = useDaemon();
+  const scheduleById = useMemo(() => new Map(schedules.map((s) => [s.id, s])), [schedules]);
   const { jobs, exchanges, approvals, needsYou } = useMemo(() => derive(events), [events]);
   const byId = useMemo(() => new Map(jobs.map((j) => [j.job.id, j])), [jobs]);
   const now = useNow(1000);
@@ -257,6 +261,7 @@ export function App() {
         onInbox={() => go({ name: 'inbox' })}
         onHistory={() => go({ name: 'history' })}
         onSettings={() => go({ name: 'settings' })}
+        onSchedules={() => go({ name: 'schedules' })}
       />
       <main
         ref={mainRef}
@@ -280,6 +285,15 @@ export function App() {
             onBack={back}
             onOpenJob={openJob}
             onRetry={retry}
+          />
+        ) : view.name === 'schedules' ? (
+          <SchedulesView
+            schedules={schedules}
+            jobs={byId}
+            now={now}
+            act={act}
+            onBack={back}
+            onOpenJob={openJob}
           />
         ) : view.name === 'settings' ? (
           <SettingsView settings={settings} act={act} onBack={back} />
@@ -346,6 +360,8 @@ export function App() {
                 jobs={byId}
                 now={now}
                 onOpenJob={openJob}
+                schedules={scheduleById}
+                onOpenSchedules={() => go({ name: 'schedules' })}
               />
             </div>
             <aside className="inbox-side" aria-label="inbox" data-testid="inbox-side">

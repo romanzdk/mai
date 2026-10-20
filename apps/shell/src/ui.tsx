@@ -20,6 +20,7 @@ export const SHORTCUT_KEYS: Record<string, string> = {
   o: 'open-folder',
   d: 'dismiss',
   ',': 'settings',
+  s: 'schedules',
 };
 
 export function Kbd({ k }: { k: string }) {

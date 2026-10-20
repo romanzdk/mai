@@ -24,6 +24,7 @@ export interface Exchange {
   reply?: string;
   error?: string;
   jobIds: string[];
+  scheduleIds?: string[];
   aboutJobId?: string;
 }
 
@@ -34,12 +35,17 @@ export const isActive = (j: JobState) => ACTIVE.includes(j.status);
 // they did not cause themselves.
 export function needsAttention(j: JobState): boolean {
   if (isActive(j) || j.dismissed) return false;
+  // A scheduled run's report is the point of the schedule: show it until read.
+  if (j.job.scheduleId && j.status === 'done') return true;
   if ((j.report?.needs_you.length ?? 0) > 0) return true;
   return j.status === 'failed' && !j.error?.startsWith('you denied');
 }
 
 export function statusLabel(j: JobState): string {
   if (j.status === 'waiting_approval' || j.status === 'waiting_input') return 'needs you';
+  if (j.status === 'done' && j.job.scheduleId && !j.dismissed && !j.report?.needs_you.length) {
+    return 'new report';
+  }
   if (j.status === 'done' && needsAttention(j)) return 'needs you';
   return j.status;
 }
@@ -111,6 +117,7 @@ export function derive(events: MaiEvent[]): Derived {
       if (e.kind === 'desk_reply') {
         ex.reply = e.text;
         ex.jobIds = e.jobIds;
+        if (e.scheduleIds) ex.scheduleIds = e.scheduleIds;
       } else {
         ex.error = e.message;
       }

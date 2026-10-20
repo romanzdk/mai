@@ -1,4 +1,4 @@
-import type { AuthState, Usage, UsageWindow } from '@mai/protocol';
+import type { AuthState, Schedule, Usage, UsageWindow } from '@mai/protocol';
 import { type RefObject, useEffect, useRef, useState } from 'react';
 import type { Connection } from './daemon';
 import {
@@ -54,6 +54,7 @@ export function TopBar({
   onInbox,
   onHistory,
   onSettings,
+  onSchedules,
 }: {
   connection: Connection;
   inboxCount: number;
@@ -63,6 +64,7 @@ export function TopBar({
   onInbox: () => void;
   onHistory: () => void;
   onSettings: () => void;
+  onSchedules: () => void;
 }) {
   const busy = [
     counts.running > 0 && { k: 'running', text: `${counts.running} running` },
@@ -132,6 +134,15 @@ export function TopBar({
         {clockDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
       </time>
       <nav className="topbar-links">
+        <button
+          type="button"
+          className="link"
+          data-shortcut="schedules"
+          aria-keyshortcuts={keyShortcut('S')}
+          onClick={onSchedules}
+        >
+          schedules <Kbd k="S" />
+        </button>
         <button
           type="button"
           className="link"
@@ -287,6 +298,8 @@ export function Conversation({
   jobs,
   now,
   onOpenJob,
+  schedules = new Map(),
+  onOpenSchedules = () => {},
 }: {
   exchanges: Exchange[];
   deltas: Record<string, string>;
@@ -294,6 +307,8 @@ export function Conversation({
   jobs: Map<string, JobState>;
   now: number;
   onOpenJob: (id: string) => void;
+  schedules?: Map<string, Schedule>;
+  onOpenSchedules?: () => void;
 }) {
   const queued = new Set(pending.filter((p) => p.queued).map((p) => p.inputId));
   const items = [
@@ -336,6 +351,14 @@ export function Conversation({
                 >
                   → started: {job?.job.title ?? id}
                   {job ? ` (${job.status.replace('_', ' ')})` : ''}
+                </button>
+              );
+            })}
+            {(ex.scheduleIds ?? []).map((id) => {
+              const s = schedules.get(id);
+              return (
+                <button key={id} type="button" className="link started" onClick={onOpenSchedules}>
+                  → scheduled: {s ? `${s.title} (${s.when})` : 'removed'}
                 </button>
               );
             })}

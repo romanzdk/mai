@@ -8,9 +8,38 @@ export function createFakeAgent(): Agent {
     async desk(text, _ctx, onDelta) {
       onDelta('…');
       if (text.startsWith('cancel '))
-        return { reply: 'Stopping it.', jobs: [], cancel: [text.slice(7)] };
-      if (!text.includes('job')) return { reply: `echo: ${text}`, jobs: [], cancel: [] };
-      return { reply: 'On it.', jobs: [{ title: text, prompt: text }], cancel: [] };
+        return {
+          reply: 'Stopping it.',
+          jobs: [],
+          cancel: [text.slice(7)],
+          schedules: [],
+          unschedule: [],
+        };
+      if (text.startsWith('every day ')) {
+        return {
+          reply: 'Scheduled.',
+          jobs: [],
+          cancel: [],
+          schedules: [
+            {
+              title: text.slice(10),
+              prompt: text.slice(10),
+              cron: '0 8 * * *',
+              when: 'daily at 08:00',
+            },
+          ],
+          unschedule: [],
+        };
+      }
+      if (!text.includes('job'))
+        return { reply: `echo: ${text}`, jobs: [], cancel: [], schedules: [], unschedule: [] };
+      return {
+        reply: 'On it.',
+        jobs: [{ title: text, prompt: text }],
+        cancel: [],
+        schedules: [],
+        unschedule: [],
+      };
     },
     async runWorker({ spec, onEvent, requestApproval, signal }) {
       onEvent({ kind: 'tool', tool: 'Bash', summary: 'echo working' });

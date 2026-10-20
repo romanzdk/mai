@@ -2,7 +2,13 @@ import { expect, test } from 'vitest';
 import { parseDeskOutput, visibleReply } from './parse';
 
 test('plain answer has no jobs', () => {
-  expect(parseDeskOutput("It's 09:30.")).toEqual({ reply: "It's 09:30.", jobs: [], cancel: [] });
+  expect(parseDeskOutput("It's 09:30.")).toEqual({
+    reply: "It's 09:30.",
+    jobs: [],
+    cancel: [],
+    schedules: [],
+    unschedule: [],
+  });
 });
 
 test('dispatch block becomes jobs and is removed from the reply', () => {
@@ -13,6 +19,8 @@ test('dispatch block becomes jobs and is removed from the reply', () => {
     reply: 'On it.',
     jobs: [{ title: 'Notes', prompt: 'Create ~/Desktop/notes', cwd: '/tmp/x' }],
     cancel: [],
+    schedules: [],
+    unschedule: [],
   });
 });
 
@@ -47,6 +55,8 @@ test('cancel block lists job ids', () => {
     reply: 'Stopping it.',
     jobs: [],
     cancel: ['ab12cd34'],
+    schedules: [],
+    unschedule: [],
   });
 });
 
@@ -61,4 +71,29 @@ test('a bad cancel block also drops a valid dispatch', () => {
 test('streaming view hides a partial cancel tag', () => {
   expect(visibleReply('Stopping. <canc')).toBe('Stopping.');
   expect(visibleReply('Stopping. <cancel>["a')).toBe('Stopping.');
+});
+
+test('a schedule block needs a valid cron and a "when"', () => {
+  const ok = parseDeskOutput(
+    'Done.\n<schedule>[{"title":"Brief","prompt":"Summarise my inbox","cron":"30 7 * * 1-5","when":"weekdays at 07:30"}]</schedule>',
+  );
+  expect(ok).toMatchObject({
+    reply: 'Done.',
+    schedules: [
+      {
+        title: 'Brief',
+        prompt: 'Summarise my inbox',
+        cron: '30 7 * * 1-5',
+        when: 'weekdays at 07:30',
+      },
+    ],
+  });
+  const bad = parseDeskOutput(
+    'Done. <schedule>[{"title":"x","prompt":"y","cron":"every day","when":"daily"}]</schedule>',
+  );
+  expect(bad).toMatchObject({ schedules: [], error: expect.stringContaining('schedule') });
+  expect(parseDeskOutput('Removed. <unschedule>["s1"]</unschedule>')).toMatchObject({
+    reply: 'Removed.',
+    unschedule: ['s1'],
+  });
 });

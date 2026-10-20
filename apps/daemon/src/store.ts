@@ -6,6 +6,8 @@ import type {
   JobStatus,
   MaiEvent,
   Report,
+  Schedule,
+  ScheduleSpec,
   Settings,
 } from '@mai/protocol';
 
@@ -41,6 +43,15 @@ CREATE TABLE IF NOT EXISTS approvals (
   decided_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS events_job ON events (job_id);
+CREATE TABLE IF NOT EXISTS schedules (
+  id TEXT PRIMARY KEY,
+  spec TEXT NOT NULL,
+  enabled INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_run_at INTEGER,
+  last_job_id TEXT,
+  last_checked_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -63,6 +74,7 @@ interface JobRow {
   finished_at: number | null;
   project: string | null;
   branch: string | null;
+  schedule_id: string | null;
 }
 
 const toJob = (r: JobRow): Job => ({
@@ -76,12 +88,16 @@ const toJob = (r: JobRow): Job => ({
   finishedAt: r.finished_at,
   ...(r.project ? { project: r.project } : {}),
   ...(r.branch ? { branch: r.branch } : {}),
+  ...(r.schedule_id ? { scheduleId: r.schedule_id } : {}),
 });
+
+export type StoredSchedule = Schedule & { lastCheckedAt: number };
 
 // Columns added after a release; CREATE TABLE IF NOT EXISTS does not add them to old files.
 const ADDED_COLUMNS: [table: string, column: string, type: string][] = [
   ['jobs', 'project', 'TEXT'],
   ['jobs', 'branch', 'TEXT'],
+  ['jobs', 'schedule_id', 'TEXT'],
 ];
 
 export class Store {
@@ -132,7 +148,7 @@ export class Store {
   insertJob(job: Job): void {
     this.db
       .prepare(
-        'INSERT INTO jobs (id, title, spec, status, model, cwd, created_at, finished_at, project, branch) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO jobs (id, title, spec, status, model, cwd, created_at, finished_at, project, branch, schedule_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
       .run(
         job.id,
@@ -145,6 +161,7 @@ export class Store {
         job.finishedAt,
         job.project ?? null,
         job.branch ?? null,
+        job.scheduleId ?? null,
       );
   }
 
@@ -195,6 +212,48 @@ export class Store {
     return this.db
       .prepare("SELECT id, job_id AS jobId FROM approvals WHERE status = 'pending'")
       .all() as { id: string; jobId: string }[];
+  }
+
+  schedules(): StoredSchedule[] {
+    const rows = this.db.prepare('SELECT * FROM schedules ORDER BY created_at').all() as {
+      id: string;
+      spec: string;
+      enabled: number;
+      created_at: number;
+      last_run_at: number | null;
+      last_job_id: string | null;
+      last_checked_at: number;
+    }[];
+    return rows.map((r) => ({
+      ...(JSON.parse(r.spec) as ScheduleSpec),
+      id: r.id,
+      enabled: r.enabled === 1,
+      createdAt: r.created_at,
+      lastRunAt: r.last_run_at,
+      lastJobId: r.last_job_id,
+      lastCheckedAt: r.last_checked_at,
+    }));
+  }
+
+  saveSchedule(s: StoredSchedule): void {
+    const { id, enabled, createdAt, lastRunAt, lastJobId, lastCheckedAt, ...spec } = s;
+    this.db
+      .prepare(
+        'INSERT OR REPLACE INTO schedules (id, spec, enabled, created_at, last_run_at, last_job_id, last_checked_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        id,
+        JSON.stringify(spec),
+        enabled ? 1 : 0,
+        createdAt,
+        lastRunAt,
+        lastJobId,
+        lastCheckedAt,
+      );
+  }
+
+  deleteSchedule(id: string): boolean {
+    return this.db.prepare('DELETE FROM schedules WHERE id = ?').run(id).changes > 0;
   }
 
   getSettings(): unknown {

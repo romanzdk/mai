@@ -67,7 +67,13 @@ test('new jobs wait while a plan window is over the limit; "run anyway" lets the
     usage: async () => usage,
     async desk(text, ctx) {
       desks.push(ctx);
-      return { reply: 'ok', jobs: [{ title: text, prompt: text }], cancel: [] };
+      return {
+        reply: 'ok',
+        jobs: [{ title: text, prompt: text }],
+        cancel: [],
+        schedules: [],
+        unschedule: [],
+      };
     },
   });
   const paused: (string | null)[] = [];

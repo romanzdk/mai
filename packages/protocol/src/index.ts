@@ -1,4 +1,6 @@
-export const PROTOCOL_VERSION = 8;
+export { type Cron, cronMatches, nextRun, parseCron } from './cron';
+
+export const PROTOCOL_VERSION = 10;
 
 // Rules whose approval may be remembered for the rest of a job. Never the ones that can lose
 // data or money: one remembered delete would silently allow any later delete in that job.
@@ -34,6 +36,26 @@ export interface Job {
   // Git project jobs run in a worktree (cwd) of `project` on `branch`.
   project?: string;
   branch?: string;
+  // Set when a schedule started this job.
+  scheduleId?: string;
+}
+
+export interface ScheduleSpec {
+  title: string;
+  prompt: string;
+  // Five-field cron in local time; `when` is the same in words, for people.
+  cron: string;
+  when: string;
+  cwd?: string;
+  model?: string;
+}
+
+export interface Schedule extends ScheduleSpec {
+  id: string;
+  enabled: boolean;
+  createdAt: number;
+  lastRunAt: number | null;
+  lastJobId: string | null;
 }
 
 export interface Report {
@@ -45,7 +67,13 @@ export interface Report {
 
 export type EventBody =
   | { kind: 'user_input'; text: string; inputId: string; aboutJobId?: string }
-  | { kind: 'desk_reply'; text: string; inputId: string; jobIds: string[] }
+  | {
+      kind: 'desk_reply';
+      text: string;
+      inputId: string;
+      jobIds: string[];
+      scheduleIds?: string[];
+    }
   | { kind: 'desk_error'; message: string; inputId: string }
   | { kind: 'job_created'; job: Job; retryOf?: string }
   | { kind: 'job_status'; status: JobStatus; error?: string }
@@ -104,6 +132,8 @@ export interface Settings {
   // Give the desk and workers the owner's ~/context notes (docs/DECISIONS.md 030).
   memory: boolean;
   contextDir: string;
+  // Workers may use the owner's claude.ai connectors (Gmail, Slack, …); writes need approval.
+  connectors: boolean;
 }
 
 export const DEFAULT_SETTINGS: Omit<Settings, 'workspace' | 'contextDir'> = {
@@ -118,6 +148,7 @@ export const DEFAULT_SETTINGS: Omit<Settings, 'workspace' | 'contextDir'> = {
   pauseAtUsagePct: 95,
   notifications: true,
   memory: true,
+  connectors: true,
 };
 
 const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
@@ -166,6 +197,12 @@ export type ClientMessage =
   | Msg<'open_path', { jobId: string; path: string }>
   | Msg<'set_settings', { patch: Partial<Settings> }>
   | Msg<'resume_anyway'>
+  | Msg<
+      'schedule_update',
+      { id: string; patch: Partial<Pick<Schedule, 'enabled' | 'cron' | 'when'>> }
+    >
+  | Msg<'schedule_delete', { id: string }>
+  | Msg<'schedule_run', { id: string }>
   | Msg<'login'>;
 
 export type AuthState = 'checking' | 'logged_in' | 'logged_out' | 'login_started' | 'api_key';
@@ -180,7 +217,8 @@ export type ServerMessage =
   | Msg<'usage', { usage: Usage | null }>
   | Msg<'settings', { settings: Settings }>
   // Why new jobs are not starting right now, or null when they start normally.
-  | Msg<'scheduler', { paused: string | null }>;
+  | Msg<'scheduler', { paused: string | null }>
+  | Msg<'schedules', { schedules: Schedule[] }>;
 
 export const encode = (msg: ClientMessage | ServerMessage): string => JSON.stringify(msg);
 

@@ -1586,3 +1586,51 @@ ol {
 .field-toggle .field-hint {
   grid-column: 2;
 }
+
+/* ---------- schedules ---------- */
+.schedule-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: calc(var(--space) * 2);
+}
+
+.schedule-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  padding: calc(var(--space) * 2);
+  background: var(--glass), var(--glass-solid);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.schedule-card[data-enabled="false"] {
+  opacity: 0.7;
+}
+
+.schedule-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+}
+
+.schedule-head h2 {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.schedule-when {
+  color: var(--text-2);
+}
+
+.count-chip[data-kind="paused"]::before {
+  background: var(--muted);
+}
+
+.timing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

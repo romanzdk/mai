@@ -20,6 +20,8 @@ test('never runs more workers than maxParallel and drains the queue', async () =
         reply: 'ok',
         jobs: [1, 2, 3].map((n) => ({ title: `job ${n}`, prompt: `p${n}` })),
         cancel: [],
+        schedules: [],
+        unschedule: [],
       };
     },
     async runWorker() {
@@ -80,6 +82,8 @@ test('a job naming a missing project folder fails instead of creating it', async
         reply: 'ok',
         jobs: [{ title: 't', prompt: 'p', cwd: '/definitely/not/here' }],
         cancel: [],
+        schedules: [],
+        unschedule: [],
       };
     },
   };

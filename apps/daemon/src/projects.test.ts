@@ -42,7 +42,13 @@ function setup(cwd: string) {
     ...createFakeAgent(),
     async desk(_text, ctx) {
       desks.push(ctx);
-      return { reply: 'ok', jobs: [{ title: 't', prompt: 'p', cwd }], cancel: [] };
+      return {
+        reply: 'ok',
+        jobs: [{ title: 't', prompt: 'p', cwd }],
+        cancel: [],
+        schedules: [],
+        unschedule: [],
+      };
     },
     async runWorker(args) {
       workerCalls.push(args);

@@ -269,3 +269,27 @@ needs approval, and the card shows the -/+ text. Reading is always free. "Rememb
 makes the desk dispatch a one-line append to `inbox.md`. Switch and folder are in Settings
 (default on, `~/context`). Ceiling: regex screen over shell text; see the policy's ponytail
 note.
+
+## 031 — Scheduled jobs and claude.ai connectors for workers (2026-10-20)
+
+**Schedules.** Created by asking the desk ("every weekday at 7:30 …"): it ends its reply with
+`<schedule>[{title, prompt, cron, when}]</schedule>` (or `<unschedule>[ids]</unschedule>`),
+validated before anything is saved. Five-field cron in local time, implemented in
+`packages/protocol/src/cron.ts` (no dependency) so the UI can show next runs. The daemon
+ticks every 30 s; each due run becomes a normal job with `scheduleId`. Missed runs (laptop
+asleep, mai closed) catch up once if they were due within 12 h; older ones are skipped. Runs
+of one schedule never stack. Pausing and resuming does not replay missed runs. A finished
+scheduled run shows as "new report" in the inbox until dismissed. The Schedules view (⌘S)
+lists next and last run, and offers run now, pause/resume, change time and delete.
+
+**Connectors.** Workers get the owner's claude.ai connectors (Gmail, Slack, Google Drive,
+Atlassian, Claude Docs, …) when Settings → connectors is on (default). They load only
+without strict MCP config, and their tool names differ per account, so workers then run in
+`default` permission mode with `canUseTool` allowing whatever the PreToolUse policy let
+through. The policy allows a connector tool only when its action is a read (get, list,
+search, read, fetch, query, lookup, export, …); everything else, drafts included, needs an
+approval card that shows the exact arguments. Tools from any other MCP server (e.g. a repo's
+`.mcp.json`) always ask. The desk never gets connectors.
+
+**Language.** The owner's notes say "reply in Czech unless I ask in English"; a language rule
+placed after the notes makes the desk follow the language of each message.

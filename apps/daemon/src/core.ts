@@ -12,14 +12,18 @@ import {
   type Job,
   type JobSpec,
   type JobStatus,
+  nextRun,
   PROTOCOL_VERSION,
+  parseCron,
   REMEMBERABLE_RULES,
+  type Schedule,
+  type ScheduleSpec,
   type ServerMessage,
   type Settings,
   type Usage,
   type UsageWindow,
 } from '@mai/protocol';
-import type { Store } from './store';
+import type { Store, StoredSchedule } from './store';
 
 export interface CoreOptions {
   store: Store;
@@ -40,6 +44,9 @@ interface RunState {
 }
 
 const IDLE_CHECK_MS = 15_000;
+const SCHEDULE_TICK_MS = 30_000;
+// A run missed while mai was asleep or closed still happens once if it was due this recently.
+const CATCH_UP_MS = 12 * 3600_000;
 
 const hhmm = (iso: string | null) =>
   iso
@@ -91,6 +98,7 @@ export class Core {
   private loginTimer?: ReturnType<typeof setInterval>;
   private sweepTimer: ReturnType<typeof setInterval>;
   private usageTimer: ReturnType<typeof setInterval>;
+  private scheduleTimer: ReturnType<typeof setInterval>;
   private usageState: Usage | null = null;
   private usageCheckedAt = 0;
   private settingsState: Settings;
@@ -130,6 +138,107 @@ export class Core {
     this.sweepTimer.unref();
     this.usageTimer = setInterval(() => void this.refreshUsage(true), USAGE_POLL_MS);
     this.usageTimer.unref();
+    this.tickSchedules();
+    this.scheduleTimer = setInterval(() => this.tickSchedules(), SCHEDULE_TICK_MS);
+    this.scheduleTimer.unref();
+  }
+
+  get schedules(): Schedule[] {
+    return this.opts.store.schedules().map(({ lastCheckedAt: _, ...s }) => s);
+  }
+
+  private broadcastSchedules(): void {
+    this.broadcast({ v: PROTOCOL_VERSION, type: 'schedules', schedules: this.schedules });
+  }
+
+  createSchedule(spec: ScheduleSpec, now = Date.now()): Schedule {
+    parseCron(spec.cron);
+    const s: StoredSchedule = {
+      ...spec,
+      id: shortId(),
+      enabled: true,
+      createdAt: now,
+      lastRunAt: null,
+      lastJobId: null,
+      lastCheckedAt: now,
+    };
+    this.opts.store.saveSchedule(s);
+    this.broadcastSchedules();
+    const { lastCheckedAt: _, ...out } = s;
+    return out;
+  }
+
+  updateSchedule(id: string, patch: unknown, now = Date.now()): boolean {
+    const s = this.opts.store.schedules().find((x) => x.id === id);
+    if (!s || typeof patch !== 'object' || patch === null) return false;
+    const { enabled, cron, when } = patch as Record<string, unknown>;
+    const next = { ...s };
+    if (typeof cron === 'string') {
+      try {
+        parseCron(cron);
+      } catch {
+        return false;
+      }
+      next.cron = cron.trim();
+    }
+    if (typeof when === 'string' && when.trim()) next.when = when.trim();
+    if (typeof enabled === 'boolean') {
+      // Resuming does not replay the runs missed while paused.
+      if (enabled && !s.enabled) next.lastCheckedAt = now;
+      next.enabled = enabled;
+    }
+    this.opts.store.saveSchedule(next);
+    this.broadcastSchedules();
+    return true;
+  }
+
+  deleteSchedule(id: string): boolean {
+    const ok = this.opts.store.deleteSchedule(id);
+    if (ok) this.broadcastSchedules();
+    return ok;
+  }
+
+  runScheduleNow(id: string): boolean {
+    const s = this.opts.store.schedules().find((x) => x.id === id);
+    if (!s) return false;
+    this.fire(s, Date.now());
+    return true;
+  }
+
+  tickSchedules(now = Date.now()): void {
+    for (const s of this.opts.store.schedules()) {
+      if (!s.enabled) continue;
+      const from = Math.max(s.lastCheckedAt, now - CATCH_UP_MS);
+      let due: Date | null = null;
+      try {
+        due = nextRun(parseCron(s.cron), new Date(from));
+      } catch {
+        continue;
+      }
+      const updated = { ...s, lastCheckedAt: now };
+      this.opts.store.saveSchedule(updated);
+      if (!due || due.getTime() > now) continue;
+      const previous = s.lastJobId ? this.opts.store.job(s.lastJobId) : undefined;
+      // Never stack runs of the same schedule.
+      if (previous && !TERMINAL.includes(previous.status)) continue;
+      this.fire(updated, now);
+    }
+  }
+
+  private fire(s: StoredSchedule, now: number): void {
+    const job = this.createJob(
+      {
+        title: s.title,
+        prompt: `${s.prompt}\n\n(This is a scheduled run: ${s.when}.)`,
+        ...(s.cwd ? { cwd: s.cwd } : {}),
+        ...(s.model ? { model: s.model } : {}),
+      },
+      s.id,
+    );
+    this.record(job.id, { kind: 'job_created', job });
+    this.opts.store.saveSchedule({ ...s, lastRunAt: now, lastJobId: job.id });
+    this.broadcastSchedules();
+    this.schedule();
   }
 
   get usage(): Usage | null {
@@ -239,6 +348,12 @@ export class Core {
     const ctx = {
       now: new Date(),
       ...(about ? { about: this.aboutContext(about) } : {}),
+      schedules: this.schedules.map(({ id, title, when, enabled }) => ({
+        id,
+        title,
+        when,
+        enabled,
+      })),
       ...(this.paused
         ? { notice: `New jobs are on hold because ${this.paused}; they wait in the queue.` }
         : {}),
@@ -255,12 +370,23 @@ export class Core {
         this.broadcast({ v: PROTOCOL_VERSION, type: 'desk_delta', inputId, text: visible }),
       );
       const jobs = out.jobs.map((spec) => this.createJob(spec));
+      const created = out.schedules.map((spec) => this.createSchedule(spec));
       this.record(null, {
         kind: 'desk_reply',
         text: out.reply,
         inputId,
         jobIds: jobs.map((j) => j.id),
+        ...(created.length ? { scheduleIds: created.map((x) => x.id) } : {}),
       });
+      for (const id of out.unschedule) {
+        if (!this.deleteSchedule(id)) {
+          this.record(null, {
+            kind: 'desk_error',
+            message: `no schedule ${id} to remove`,
+            inputId,
+          });
+        }
+      }
       if (out.error) this.record(null, { kind: 'desk_error', message: out.error, inputId });
       for (const id of out.cancel) {
         if (!this.cancel(id)) {
@@ -289,7 +415,7 @@ export class Core {
     return { job, ...(report ? { report } : {}), lines: lines.slice(-15) };
   }
 
-  private createJob(spec: JobSpec): Job {
+  private createJob(spec: JobSpec, scheduleId?: string): Job {
     const id = shortId();
     const jobDir = join(this.settingsState.workspace, 'jobs', id);
     // A git project gets its own worktree and branch, so the user's checkout is never touched
@@ -308,6 +434,7 @@ export class Core {
       createdAt: Date.now(),
       finishedAt: null,
       ...(git ? { project: git.project, branch: git.branch } : {}),
+      ...(scheduleId ? { scheduleId } : {}),
     };
     this.opts.store.insertJob(job);
     return job;
@@ -589,6 +716,7 @@ export class Core {
     clearInterval(this.loginTimer);
     clearInterval(this.sweepTimer);
     clearInterval(this.usageTimer);
+    clearInterval(this.scheduleTimer);
     for (const state of this.running.values()) state.abort.abort();
     this.opts.agent.close();
   }

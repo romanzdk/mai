@@ -57,6 +57,7 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
     send({ v: PROTOCOL_VERSION, type: 'usage', usage: core.usage });
     send({ v: PROTOCOL_VERSION, type: 'settings', settings: core.settings });
     send({ v: PROTOCOL_VERSION, type: 'scheduler', paused: core.paused });
+    send({ v: PROTOCOL_VERSION, type: 'schedules', schedules: core.schedules });
     ws.on('message', (data) => {
       const msg = decode<ClientMessage>(data.toString());
       if (!msg) return;
@@ -107,6 +108,15 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
           break;
         case 'set_settings':
           core.updateSettings(msg.patch);
+          break;
+        case 'schedule_update':
+          core.updateSchedule(String(msg.id), msg.patch);
+          break;
+        case 'schedule_delete':
+          core.deleteSchedule(String(msg.id));
+          break;
+        case 'schedule_run':
+          core.runScheduleNow(String(msg.id));
           break;
         case 'resume_anyway':
           core.resumeAnyway();

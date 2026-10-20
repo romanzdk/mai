@@ -218,8 +218,41 @@ function describeFileChange(tool: string, i: Input): string {
   return `${tool} ${path}`;
 }
 
+// claude.ai connector tools are free only when their action reads; everything else (send,
+// reply, create, edit, delete, share, label, drafts, …) asks. Unknown verbs ask too.
+const CONNECTOR_READ =
+  /^(get|list|search|read|fetch|query|lookup|guide|download|export|atlassianUserInfo)/i;
+
+function mcpDecision(tool: string, i: Input): PolicyDecision | undefined {
+  const [prefix, server = '', action = ''] = tool.split('__');
+  if (prefix !== 'mcp' || server === 'playwright') return undefined;
+  const command = `${server.replace(/^claude_ai_/, '').replaceAll('_', ' ')} ${action}: ${clipJson(i)}`;
+  if (!server.startsWith('claude_ai_')) {
+    return {
+      allow: false,
+      ruleId: 'mcp-other',
+      reason: `uses a tool from the ${server} MCP server`,
+      command,
+    };
+  }
+  if (CONNECTOR_READ.test(action.replace(/^slack_/, ''))) return { allow: true };
+  return {
+    allow: false,
+    ruleId: 'connector-write',
+    reason: 'sends, changes or shares something in your connected accounts',
+    command,
+  };
+}
+
+const clipJson = (i: Input) => {
+  const text = JSON.stringify(i);
+  return text.length > 600 ? `${text.slice(0, 600)}…` : text;
+};
+
 export function checkToolUse(tool: string, input: unknown, ctx: PolicyContext): PolicyDecision {
   const i = (typeof input === 'object' && input !== null ? input : {}) as Input;
+  const mcp = mcpDecision(tool, i);
+  if (mcp) return mcp;
   if (
     contextFileChange(tool, i, ctx) ||
     (tool === 'Bash' && contextShellChange(str(i.command), ctx))

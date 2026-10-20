@@ -66,6 +66,7 @@ core = new Core({
           headedBrowser: current().browserHeaded,
           deskModel: current().deskModel,
           contextDir: current().memory ? current().contextDir : null,
+          connectors: current().connectors,
         })),
   home,
   settings,

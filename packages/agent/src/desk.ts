@@ -14,6 +14,10 @@ How to respond:
 <dispatch>[{"title": "short title", "prompt": "complete, self-contained instructions for the worker"}]</dispatch>
   Write the worker prompt so it can be done without asking anything; keep the user's exact names, paths and wording. Add "cwd": "/absolute/path" only when the user names an existing project folder. Use several entries only for clearly independent tasks.
 - To stop jobs the user wants stopped, say so in one sentence and end with <cancel>["job id"]</cancel>, using ids from the job list.
+- For recurring work ("every morning", "each Friday at 5", "every 2 hours"), say in one sentence what will run when, and end with:
+<schedule>[{"title": "short title", "prompt": "complete instructions for one run", "cron": "30 7 * * 1-5", "when": "weekdays at 07:30"}]</schedule>
+  cron is five fields in local time: minute hour day-of-month month day-of-week (0 = Sunday), numbers only. "when" says the same in plain words. Each run is a normal job whose report lands in the inbox.
+- To remove a schedule, end with <unschedule>["schedule id"]</unschedule>, using ids from the schedule list.
 - If the request is ambiguous in a way that changes the result, ask exactly one short question and do not dispatch.
 - You cannot approve or deny a job's paused action; tell the user to use the approval card in the inbox.
 - A message that says work will happen MUST end with the dispatch block; without the block nothing runs. This holds for repeats too ("again", "retry"): dispatch a new job each time.
@@ -21,7 +25,13 @@ How to respond:
 - Answer only what was asked; do not bring up other jobs unless the user asks about them.
 - Plain text, no markdown headings.
 
-Each user message starts with a <context> block written by mai (not the user) with the local time, the job list and recent reports.`;
+Each user message starts with a <context> block written by mai (not the user) with the local time, the job list, the schedules and recent reports.`;
+
+// Last in the prompt so it wins over notes like "reply in Czech unless I ask in English":
+// the language the user writes in is what they are asking in.
+const LANGUAGE_RULE = `
+
+Language: answer in the language of the user's latest message. If they write in English, answer in English and write titles and worker prompts in English; if they write in Czech, use Czech. This applies even when the notes name a default language.`;
 
 export interface DeskContext {
   now: Date;
@@ -31,6 +41,7 @@ export interface DeskContext {
   about?: { job: Job; report?: Report; lines: string[] };
   jobs: Pick<Job, 'id' | 'title' | 'status'>[];
   reports: { jobId: string; title: string; summary: string; needs_you: string[] }[];
+  schedules?: { id: string; title: string; when: string; enabled: boolean }[];
 }
 
 export type DeskResult = DeskOutput;
@@ -46,7 +57,7 @@ function aboutBlock({ job, report, lines }: NonNullable<DeskContext['about']>): 
   ].join('\n');
 }
 
-function contextBlock({ now, jobs, reports, about, notice }: DeskContext): string {
+function contextBlock({ now, jobs, reports, about, notice, schedules = [] }: DeskContext): string {
   const time = now.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' });
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const jobLines = jobs.map((j) => `- ${j.id} [${j.status}] ${j.title}`).join('\n') || '- none';
@@ -57,7 +68,11 @@ function contextBlock({ now, jobs, reports, about, notice }: DeskContext): strin
           `- ${r.jobId} ${r.title}: ${r.summary}${r.needs_you.length ? ` (needs you: ${r.needs_you.join('; ')})` : ''}`,
       )
       .join('\n') || '- none';
-  return `<context>\nLocal time: ${time} (${zone})\nJobs:\n${jobLines}\nRecent reports:\n${reportLines}${about ? `\n${aboutBlock(about)}` : ''}${notice ? `\nNote: ${notice}` : ''}\n</context>`;
+  const scheduleLines =
+    schedules
+      .map((x) => `- ${x.id} [${x.enabled ? 'on' : 'paused'}] ${x.when}: ${x.title}`)
+      .join('\n') || '- none';
+  return `<context>\nLocal time: ${time} (${zone})\nJobs:\n${jobLines}\nSchedules:\n${scheduleLines}\nRecent reports:\n${reportLines}${about ? `\n${aboutBlock(about)}` : ''}${notice ? `\nNote: ${notice}` : ''}\n</context>`;
 }
 
 interface Turn {
@@ -114,7 +129,7 @@ export class FrontDesk {
         thinking: { type: 'disabled' },
         effort: 'low',
         includePartialMessages: true,
-        systemPrompt: SYSTEM_PROMPT + this.memoryText,
+        systemPrompt: SYSTEM_PROMPT + this.memoryText + LANGUAGE_RULE,
         env: sdkEnv(this.config().apiKeyMode),
       },
     });

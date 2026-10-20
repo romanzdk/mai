@@ -1,12 +1,14 @@
-import type { JobSpec } from '@mai/protocol';
+import { type JobSpec, parseCron, type ScheduleSpec } from '@mai/protocol';
 
-const TAGS = ['dispatch', 'cancel'] as const;
+const TAGS = ['dispatch', 'cancel', 'schedule', 'unschedule'] as const;
 const block = (tag: string) => new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`);
 
 export interface DeskOutput {
   reply: string;
   jobs: JobSpec[];
   cancel: string[];
+  schedules: ScheduleSpec[];
+  unschedule: string[];
   error?: string;
 }
 
@@ -35,6 +37,18 @@ function toJobSpec(raw: unknown): JobSpec | null {
   return { title, prompt, ...(cwd ? { cwd } : {}), ...(model ? { model } : {}) };
 }
 
+function toScheduleSpec(raw: unknown): ScheduleSpec | null {
+  const job = toJobSpec(raw);
+  const { cron, when } = (raw ?? {}) as Record<string, unknown>;
+  if (!job || !isNonEmptyString(cron) || !isNonEmptyString(when)) return null;
+  try {
+    parseCron(cron);
+  } catch {
+    return null;
+  }
+  return { ...job, cron: cron.trim(), when: when.trim() };
+}
+
 // Returns the parsed list, [] when the block is absent, or an error string.
 function readBlock<T>(text: string, tag: string, item: (raw: unknown) => T | null): T[] | string {
   const match = text.match(block(tag));
@@ -54,10 +68,23 @@ export function parseDeskOutput(text: string): DeskOutput {
   let stripped = text;
   for (const tag of TAGS) stripped = stripped.replace(block(tag), '');
   const reply = visibleReply(stripped).trim();
+  const ids = (raw: unknown) => (isNonEmptyString(raw) ? raw : null);
   const jobs = readBlock(text, 'dispatch', toJobSpec);
-  const cancel = readBlock(text, 'cancel', (raw) => (isNonEmptyString(raw) ? raw : null));
-  const errors = [jobs, cancel].filter((x): x is string => typeof x === 'string');
+  const cancel = readBlock(text, 'cancel', ids);
+  const schedules = readBlock(text, 'schedule', toScheduleSpec);
+  const unschedule = readBlock(text, 'unschedule', ids);
+  const errors = [jobs, cancel, schedules, unschedule].filter(
+    (x): x is string => typeof x === 'string',
+  );
   // Never act on half of a malformed answer.
-  if (errors.length) return { reply, jobs: [], cancel: [], error: errors.join('; ') };
-  return { reply, jobs: jobs as JobSpec[], cancel: cancel as string[] };
+  if (errors.length) {
+    return { reply, jobs: [], cancel: [], schedules: [], unschedule: [], error: errors.join('; ') };
+  }
+  return {
+    reply,
+    jobs: jobs as JobSpec[],
+    cancel: cancel as string[],
+    schedules: schedules as ScheduleSpec[],
+    unschedule: unschedule as string[],
+  };
 }

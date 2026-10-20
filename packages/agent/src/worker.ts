@@ -29,6 +29,8 @@ export interface WorkerArgs {
   requestApproval: (req: ApprovalRequest) => Promise<'approved' | 'denied'>;
   // The owner's notes folder, when memory is on.
   contextDir?: string;
+  // Load the owner's claude.ai connectors (writes go through the approval policy).
+  connectors?: boolean;
 }
 
 export interface ApprovalRequest {
@@ -59,10 +61,15 @@ const ALLOWED_TOOLS = [
   'mcp__playwright',
 ];
 
-const appendPrompt = ({ home, jobDir, git }: Pick<WorkerArgs, 'home' | 'jobDir' | 'git'>) => `
+const appendPrompt = ({
+  home,
+  jobDir,
+  git,
+  connectors,
+}: Pick<WorkerArgs, 'home' | 'jobDir' | 'git' | 'connectors'>) => `
 You are a mai worker: you run in the background for the user, who is not watching. Work on your own; nobody can answer questions mid-task. The user's home directory is ${home}.${jobDir ? `\nYour job folder is ${jobDir}. Deleting files inside it needs no approval if you use absolute paths without globs, quotes or variables.` : ''}${git ? `\nYou are in a git worktree of ${git.project}, on branch ${git.branch} made for this job. Commit your work on this branch with conventional commit messages. Never push and never switch branches; the user reviews the branch. The user's own checkout is untouched. If a commit fails (for example commit signing), never disable signing or hooks; leave the changes uncommitted and say so.` : ''}
 For websites, use the browser tools (mcp__playwright__*): a fresh browser with no logins. Prefer it over WebFetch for shops and other dynamic pages. Read pages with browser_snapshot; browser_evaluate and browser_run_code_unsafe need the user's approval.
-Deleting files elsewhere, sudo, git push/clean/reset --hard, and web actions that buy, send or submit something pause for the user's approval; the call simply waits until they decide.
+Deleting files elsewhere, sudo, git push/clean/reset --hard, and web actions that buy, send or submit something pause for the user's approval; the call simply waits until they decide.${connectors ? `\nYou can use the user's connected accounts (Gmail, Slack, Google Drive, Atlassian and others) through the mcp__claude_ai_* tools. Reading and searching are free; sending, replying, posting, creating, editing, deleting, labelling or sharing pauses for the user's approval.` : ''}
 If the user denies a call, do not try to get around it; stop and say what you could not do.
 If finishing really needs a decision from the user, stop and state exactly what you need in your final message.
 End with a short plain summary of what you did and where the results are.`;
@@ -142,12 +149,30 @@ export async function runWorker(args: WorkerArgs): Promise<WorkerResult> {
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: appendPrompt({ home, jobDir, ...(git ? { git } : {}) }) + memoryText,
+        append:
+          appendPrompt({
+            home,
+            jobDir,
+            ...(git ? { git } : {}),
+            ...(args.connectors ? { connectors: true } : {}),
+          }) + memoryText,
       },
       mcpServers: { playwright: playwrightServer(jobDir ?? cwd, args.headedBrowser) },
       maxTurns: args.maxTurns,
       ...(args.maxCostUsd > 0 ? { maxBudgetUsd: args.maxCostUsd } : {}),
-      permissionMode: 'dontAsk',
+      ...(args.connectors
+        ? {
+            // The owner's claude.ai connectors load only without strict MCP config. Their tool
+            // names vary per account, so everything the policy hook let through is allowed.
+            strictMcpConfig: false,
+            settings: {},
+            permissionMode: 'default' as const,
+            canUseTool: async (_tool: string, input: Record<string, unknown>) => ({
+              behavior: 'allow' as const,
+              updatedInput: input,
+            }),
+          }
+        : { permissionMode: 'dontAsk' as const }),
       allowedTools: ALLOWED_TOOLS,
       // Jobs may read and write anywhere in ~ without approval (docs/DECISIONS.md 004).
       additionalDirectories: [home],

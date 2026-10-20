@@ -211,3 +211,26 @@ test('new jobs are held near the plan limit until "Run anyway"', async ({ page }
   await expect(row).toContainText('done');
   await expect(banner).toHaveCount(0);
 });
+
+test('a schedule made by asking runs on demand, reports to the inbox, pauses and deletes', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await say(page, 'every day water the plants');
+  const link = page.getByTestId('conversation').getByRole('button', { name: /scheduled: water/ });
+  await expect(link).toContainText('daily at 08:00');
+  await link.click();
+  const card = page.getByTestId('schedules').getByRole('region', { name: 'water the plants' });
+  await expect(card).toContainText('Next run');
+  await card.getByRole('button', { name: 'Run now', exact: true }).click();
+  await expect(card).toContainText(/ago · (new report|done)/);
+  await page.keyboard.press('Escape');
+  const side = page.getByTestId('inbox-side');
+  await expect(side).toContainText('water the plants');
+  await page.getByRole('button', { name: 'schedules', exact: true }).click();
+  await card.getByRole('button', { name: 'Pause', exact: true }).click();
+  await expect(card).toContainText('paused');
+  await card.getByRole('button', { name: 'Delete', exact: true }).click();
+  await card.getByRole('button', { name: 'Yes, delete', exact: true }).click();
+  await expect(card).toHaveCount(0);
+});

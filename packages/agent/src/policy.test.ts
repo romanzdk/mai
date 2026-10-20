@@ -210,3 +210,51 @@ test('the approval card shows what a notes change would write', () => {
     `Edit ${join(context, 'me.md')}\n- # Me\n+ # Me\n+ - likes green tea`,
   );
 });
+
+const mcp = (name: string, input: object = {}) => checkToolUse(`mcp__${name}`, input, cctx);
+
+test.each([
+  'claude_ai_Gmail__search_threads',
+  'claude_ai_Gmail__get_message',
+  'claude_ai_Slack__slack_read_channel',
+  'claude_ai_Slack__slack_search_public_and_private',
+  'claude_ai_Atlassian__getJiraIssue',
+  'claude_ai_Atlassian__searchJiraIssuesUsingJql',
+  'claude_ai_Atlassian__atlassianUserInfo',
+  'claude_ai_Google_Drive__read_file_content',
+  'claude_ai_Claude_Docs__query',
+  'playwright__browser_snapshot',
+])('connector read is free: %s', (name) => {
+  expect(mcp(name)).toEqual({ allow: true });
+});
+
+test.each([
+  'claude_ai_Gmail__send_message',
+  'claude_ai_Gmail__reply',
+  'claude_ai_Gmail__create_draft',
+  'claude_ai_Gmail__trash_thread',
+  'claude_ai_Gmail__label_thread',
+  'claude_ai_Slack__slack_send_message',
+  'claude_ai_Slack__slack_add_reaction',
+  'claude_ai_Atlassian__editJiraIssue',
+  'claude_ai_Atlassian__transitionJiraIssue',
+  'claude_ai_Atlassian__addCommentToJiraIssue',
+  'claude_ai_Google_Drive__share_file',
+  'claude_ai_Claude_Docs__delete',
+  'claude_ai_Gmail__authenticate',
+])('connector write asks: %s', (name) => {
+  expect(mcp(name, { to: 'boss@example.com' })).toMatchObject({
+    allow: false,
+    ruleId: 'connector-write',
+  });
+});
+
+test('tools from other MCP servers ask, and the card names the action', () => {
+  expect(mcp('repo_tools__run_migration', { env: 'prod' })).toMatchObject({
+    allow: false,
+    ruleId: 'mcp-other',
+  });
+  expect(mcp('claude_ai_Gmail__send_message', { to: 'a@b.c' })).toMatchObject({
+    command: 'Gmail send_message: {"to":"a@b.c"}',
+  });
+});

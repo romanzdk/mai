@@ -15,7 +15,7 @@ export { stoppedBecause } from './worker';
 export interface Agent {
   desk(text: string, ctx: DeskContext, onDelta: (visible: string) => void): Promise<DeskResult>;
   runWorker(
-    args: Omit<WorkerArgs, 'apiKeyMode' | 'headedBrowser' | 'contextDir'>,
+    args: Omit<WorkerArgs, 'apiKeyMode' | 'headedBrowser' | 'contextDir' | 'connectors'>,
   ): Promise<WorkerResult>;
   // Settings changed: the next desk turn starts a fresh session with the new model and auth.
   reconfigure(): void;
@@ -32,6 +32,7 @@ export interface AgentConfig {
   deskModel: string;
   // Null when memory is off.
   contextDir: string | null;
+  connectors: boolean;
 }
 
 // Config is read on every call so Settings changes apply without a restart.
@@ -46,6 +47,7 @@ export function createAgent(config: () => AgentConfig): Agent {
         apiKeyMode: config().apiKeyMode,
         headedBrowser: config().headedBrowser,
         ...(config().contextDir ? { contextDir: config().contextDir as string } : {}),
+        connectors: config().connectors,
       }),
     summarize: (transcript) => summarize(transcript, config().apiKeyMode),
     authState: async () => {

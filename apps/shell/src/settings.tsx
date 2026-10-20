@@ -259,6 +259,13 @@ export function SettingsView({
               other
             </h2>
             <Toggle
+              name="connectors"
+              label="Let jobs use my connected accounts (Gmail, Slack, Drive, Atlassian…)"
+              hint="The claude.ai connectors you set up. Reading and searching are free; sending, posting, editing, deleting or sharing always asks you first."
+              value={settings.connectors}
+              save={save}
+            />
+            <Toggle
               name="notifications"
               label="Desktop notifications when mai is in the background"
               hint="For approvals and finished or failed jobs."
