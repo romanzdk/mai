@@ -58,6 +58,7 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
     send({ v: PROTOCOL_VERSION, type: 'settings', settings: core.settings });
     send({ v: PROTOCOL_VERSION, type: 'scheduler', paused: core.paused });
     send({ v: PROTOCOL_VERSION, type: 'schedules', schedules: core.schedules });
+    send({ v: PROTOCOL_VERSION, type: 'setup', ...core.setup });
     ws.on('message', (data) => {
       const msg = decode<ClientMessage>(data.toString());
       if (!msg) return;

@@ -7,6 +7,7 @@ import type { Agent, ApprovalRequest } from '@mai/agent';
 import {
   type AuthState,
   applySettings,
+  type BrowserSetup,
   DEFAULT_SETTINGS,
   type EventBody,
   type Job,
@@ -105,6 +106,7 @@ export class Core {
   // "Run anyway": the plan-limit pause is lifted until this time.
   private pauseOverrideUntil = 0;
   private lastPaused: string | null = null;
+  private setupState: { browser: BrowserSetup; detail?: string } = { browser: 'checking' };
 
   constructor(private readonly opts: CoreOptions) {
     const { store } = opts;
@@ -256,6 +258,15 @@ export class Core {
     }
     this.broadcast({ v: PROTOCOL_VERSION, type: 'usage', usage: this.usageState });
     this.schedule();
+  }
+
+  get setup() {
+    return this.setupState;
+  }
+
+  setBrowserSetup(browser: BrowserSetup, detail?: string): void {
+    this.setupState = { browser, ...(detail ? { detail } : {}) };
+    this.broadcast({ v: PROTOCOL_VERSION, type: 'setup', ...this.setupState });
   }
 
   get settings(): Settings {

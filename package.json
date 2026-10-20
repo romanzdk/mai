@@ -9,12 +9,13 @@
   "scripts": {
     "postinstall": "node scripts/fetch-node.mjs && node scripts/fetch-browser.mjs",
     "dev": "pnpm --filter @mai/daemon build && pnpm --filter @mai/shell tauri dev",
-    "build": "pnpm --filter @mai/daemon build && pnpm --filter @mai/shell tauri build",
+    "build": "node scripts/bundle-daemon.mjs && pnpm --filter @mai/shell tauri build --config src-tauri/tauri.release.json",
     "lint": "biome check .",
     "format": "biome check --write .",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "test:e2e": "pnpm --filter @mai/daemon build && pnpm --filter @mai/shell e2e"
+    "test:e2e": "pnpm --filter @mai/daemon build && pnpm --filter @mai/shell e2e",
+    "app:install": "node scripts/install-app.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

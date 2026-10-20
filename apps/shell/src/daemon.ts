@@ -1,5 +1,6 @@
 import {
   type AuthState,
+  type BrowserSetup,
   type ClientMessage,
   decode,
   encode,
@@ -50,6 +51,7 @@ export interface Daemon {
   // Why new jobs are on hold, or null.
   paused: string | null;
   schedules: Schedule[];
+  setup: { browser: BrowserSetup; detail?: string };
   // Requests queue until connected, so nothing typed or dictated is lost. Actions do not:
   // a late approve could act on stale state, so act returns false when it sent nothing.
   send: (text: string, aboutJobId?: string) => void;
@@ -78,6 +80,9 @@ export function useDaemon(): Daemon {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [paused, setPaused] = useState<string | null>(null);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [setup, setSetup] = useState<{ browser: BrowserSetup; detail?: string }>({
+    browser: 'checking',
+  });
   const wsRef = useRef<WebSocket | null>(null);
   const lastId = useRef(0);
   const outbox = useRef<ClientMessage[]>([]);
@@ -132,6 +137,8 @@ export function useDaemon(): Daemon {
           setPaused(msg.paused);
         } else if (msg?.type === 'schedules') {
           setSchedules(msg.schedules);
+        } else if (msg?.type === 'setup') {
+          setSetup({ browser: msg.browser, ...(msg.detail ? { detail: msg.detail } : {}) });
         } else if (msg?.type === 'auth') {
           setAuth({ state: msg.state, ...(msg.detail ? { detail: msg.detail } : {}) });
         }
@@ -233,6 +240,7 @@ export function useDaemon(): Daemon {
     settings,
     paused,
     schedules,
+    setup,
     send,
     act,
     restart,

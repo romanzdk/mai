@@ -5,6 +5,7 @@ import { summarize } from './report';
 import { runWorker, type WorkerArgs, type WorkerResult } from './worker';
 
 export { claudeBinary, isLoggedIn, openLoginTerminal } from './auth';
+export { ensureBrowser } from './browser';
 export type { DeskContext, DeskResult } from './desk';
 export { parseDeskOutput, visibleReply } from './parse';
 export { checkToolUse } from './policy';

@@ -88,15 +88,15 @@ fn restart_daemon(app: AppHandle, daemon: State<Daemon>) -> Result<(), String> {
 }
 
 fn daemon_script(app: &AppHandle) -> tauri::Result<PathBuf> {
-    // Dev runs the build next to its node_modules so the external Agent SDK resolves.
-    // Release packaging of the SDK is still open (docs/DECISIONS.md 013).
+    // Dev runs the build next to its node_modules so the external Agent SDK resolves; the
+    // release app ships the same layout as a resource (scripts/bundle-daemon.mjs).
     if cfg!(debug_assertions) {
         return Ok(PathBuf::from(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../daemon/dist/daemon.mjs"
         )));
     }
-    Ok(app.path().resource_dir()?.join("daemon.mjs"))
+    Ok(app.path().resource_dir()?.join("daemon").join("daemon.mjs"))
 }
 
 fn spawn_daemon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -146,6 +146,26 @@ fn spawn_daemon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// The installed app starts at login from its first run on (the owner can switch it off in
+// Settings); a marker file keeps that choice from being forced again. Dev builds never do this.
+fn enable_autostart_once(app: &AppHandle) {
+    use tauri_plugin_autostart::ManagerExt;
+    if cfg!(debug_assertions) || std::env::var_os("MAI_NO_AUTOSTART").is_some() {
+        return;
+    }
+    let Ok(dir) = app.path().app_data_dir() else {
+        return;
+    };
+    let marker = dir.join("autostart-initialised");
+    if marker.exists() {
+        return;
+    }
+    if app.autolaunch().enable().is_ok() {
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(marker, "");
+    }
+}
+
 fn toggle_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -162,6 +182,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_shortcuts([TOGGLE_SHORTCUT])
@@ -181,6 +205,7 @@ pub fn run() {
         ])
         .setup(|app| {
             spawn_daemon(app.handle())?;
+            enable_autostart_once(app.handle());
             let toggle = MenuItem::with_id(app, "toggle", "Show / hide", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit mai", true, None::<&str>)?;
             TrayIconBuilder::with_id(TRAY_ID)

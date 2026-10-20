@@ -293,3 +293,19 @@ approval card that shows the exact arguments. Tools from any other MCP server (e
 
 **Language.** The owner's notes say "reply in Czech unless I ask in English"; a language rule
 placed after the notes makes the desk follow the language of each message.
+
+## 032 — Release packaging and start at login (2026-10-20)
+
+Resolves 013. `scripts/bundle-daemon.mjs` builds `apps/daemon/package/`: `daemon.mjs` plus a
+flat (`node-linker=hoisted`, outside the workspace) `node_modules` holding only the two
+runtime externals, the Agent SDK (with this platform's Claude binary) and `@playwright/mcp`.
+`tauri.release.json` adds that folder as the `daemon/` resource; dev builds keep running from
+the repo. About 340 MB, mostly the Claude binary. Chromium is not bundled: the daemon runs
+the MCP's own `playwright install chromium` at start (quick when present) and the UI shows a
+banner during a download or on failure.
+
+`pnpm app:install` builds and installs per user without admin rights (`~/Applications` on
+macOS, an AppImage plus `.desktop` entry on Linux) and launches it. The installed app enables
+`tauri-plugin-autostart` once on its first run (a marker file records that, so turning it off
+in Settings sticks); dev builds and `MAI_NO_AUTOSTART=1` never touch login items. Not signed
+or notarised: fine for a locally built app, which macOS does not quarantine.

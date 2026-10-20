@@ -1,4 +1,4 @@
-import type { AuthState, Schedule, Usage, UsageWindow } from '@mai/protocol';
+import type { AuthState, BrowserSetup, Schedule, Usage, UsageWindow } from '@mai/protocol';
 import { type RefObject, useEffect, useRef, useState } from 'react';
 import type { Connection } from './daemon';
 import {
@@ -192,6 +192,7 @@ export function Notices({
   approvals,
   showApprovalStrip,
   paused,
+  setup,
   onInbox,
 }: {
   connection: Connection;
@@ -202,6 +203,7 @@ export function Notices({
   approvals: { approval: ApprovalEvent; job: JobState }[];
   showApprovalStrip: boolean;
   paused: string | null;
+  setup: { browser: BrowserSetup; detail?: string };
   onInbox: () => void;
 }) {
   const since = now - connection.since;
@@ -226,6 +228,17 @@ export function Notices({
       )}
       {(connection.status === 'starting' || connection.status === 'connecting') && since > 5000 && (
         <div className="banner">Starting mai…</div>
+      )}
+      {setup.browser === 'installing' && (
+        <div className="banner" data-testid="setup">
+          Downloading the browser for web tasks (one time, about 150 MB)…
+        </div>
+      )}
+      {setup.browser === 'failed' && (
+        <div className="banner danger" data-testid="setup">
+          Couldn't download the browser for web tasks: {setup.detail ?? 'unknown error'}. Web tasks
+          won't work until it is installed; mai tries again on its next start.
+        </div>
       )}
       {paused && (
         <div className="banner" data-testid="paused">

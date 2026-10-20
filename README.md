@@ -11,17 +11,22 @@ actions that buy or send something pause behind an approval card. Jobs can be ca
 retried, asked about, and searched. See [docs/SPEC.md](docs/SPEC.md)
 for the plan.
 
-## Install and run
+## Install
 
-Needs [Rust](https://rustup.rs), [pnpm](https://pnpm.io) and any Node ≥ 24 to run pnpm. On Ubuntu,
-also the [Tauri system packages](https://v2.tauri.app/start/prerequisites/#linux).
+Needs [Rust](https://rustup.rs), [pnpm](https://pnpm.io), any Node ≥ 24 to run pnpm, and a
+signed-in [Claude Code](https://code.claude.com) (`claude login`, your subscription). On
+Ubuntu, also the [Tauri system packages](https://v2.tauri.app/start/prerequisites/#linux).
 
 ```sh
-git clone <this repo> mai && cd mai && pnpm install && pnpm dev
+git clone <this repo> mai && cd mai && pnpm install && pnpm app:install
 ```
 
-`pnpm install` downloads a pinned Node 24 binary (the daemon sidecar) and the Chromium build the
-workers' browser uses.
+This builds the app, installs it for your user (`~/Applications/mai.app` on macOS,
+`~/.local/bin/mai.AppImage` plus a menu entry on Linux) and starts it. The first start
+registers mai to start at login (switch it off in Settings) and downloads the browser that
+web tasks use. Run the same command again to update.
+
+For development: `pnpm install && pnpm dev`.
 
 `Cmd/Ctrl+Shift+Space` shows or hides the window. The tray icon has Show/Hide and Quit.
 

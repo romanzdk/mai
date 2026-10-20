@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createAgent } from '@mai/agent';
+import { createAgent, ensureBrowser } from '@mai/agent';
 import { applySettings, DEFAULT_SETTINGS, type Settings } from '@mai/protocol';
 import { Core } from './core';
 import { createFakeAgent } from './fake-agent';
@@ -76,6 +76,16 @@ const server = await startServer({ token, core, port: Number(env.MAI_PORT ?? 0) 
 // The Tauri host parses this line to learn the port; keep the format in sync with lib.rs.
 console.log(`MAI_DAEMON_READY ${JSON.stringify({ port: server.port })}`);
 void core.checkAuth().then(() => core.refreshUsage(true));
+
+if (env.MAI_FAKE_AGENT === '1' || env.MAI_SKIP_BROWSER_SETUP === '1') {
+  core.setBrowserSetup('ready');
+} else {
+  ensureBrowser(() => core?.setBrowserSetup('installing'))
+    .then(() => core?.setBrowserSetup('ready'))
+    .catch((e: unknown) =>
+      core?.setBrowserSetup('failed', e instanceof Error ? e.message : String(e)),
+    );
+}
 
 const shutdown = () => {
   core.shutdown();

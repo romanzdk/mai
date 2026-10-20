@@ -1,6 +1,6 @@
 export { type Cron, cronMatches, nextRun, parseCron } from './cron';
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 // Rules whose approval may be remembered for the rest of a job. Never the ones that can lose
 // data or money: one remembered delete would silently allow any later delete in that job.
@@ -218,7 +218,11 @@ export type ServerMessage =
   | Msg<'settings', { settings: Settings }>
   // Why new jobs are not starting right now, or null when they start normally.
   | Msg<'scheduler', { paused: string | null }>
-  | Msg<'schedules', { schedules: Schedule[] }>;
+  | Msg<'schedules', { schedules: Schedule[] }>
+  // One-time setup of the workers' browser (Chromium for the Playwright MCP).
+  | Msg<'setup', { browser: BrowserSetup; detail?: string }>;
+
+export type BrowserSetup = 'checking' | 'installing' | 'ready' | 'failed';
 
 export const encode = (msg: ClientMessage | ServerMessage): string => JSON.stringify(msg);
 

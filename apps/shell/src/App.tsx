@@ -61,6 +61,7 @@ export function App() {
     settings,
     paused,
     schedules,
+    setup,
     send,
     act,
     restart,
@@ -393,6 +394,7 @@ export function App() {
         restart={restart}
         approvals={approvals}
         paused={paused}
+        setup={setup}
         showApprovalStrip={
           view.name !== 'home' && view.name !== 'inbox' && !open?.pendingApprovals.length
         }

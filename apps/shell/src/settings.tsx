@@ -1,4 +1,5 @@
 import type { Settings } from '@mai/protocol';
+import { isTauri } from '@tauri-apps/api/core';
 import { useEffect, useId, useState } from 'react';
 import type { Act } from './ui';
 
@@ -112,6 +113,35 @@ function Toggle({
       />
       <label htmlFor={id}>{label}</label>
       {hint && <p className="field-hint">{hint}</p>}
+    </div>
+  );
+}
+
+// Lives in the desktop host, not the daemon: the OS login item for this app.
+function LoginItemToggle() {
+  const id = useId();
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    void import('@tauri-apps/plugin-autostart')
+      .then((a) => a.isEnabled())
+      .then(setOn)
+      .catch(() => setOn(null));
+  }, []);
+  if (on === null) return null;
+  return (
+    <div className="field field-toggle">
+      <input
+        id={id}
+        type="checkbox"
+        checked={on}
+        onChange={async (e) => {
+          const a = await import('@tauri-apps/plugin-autostart');
+          await (e.target.checked ? a.enable() : a.disable());
+          setOn(await a.isEnabled());
+        }}
+      />
+      <label htmlFor={id}>Start mai when I log in</label>
+      <p className="field-hint">Keeps schedules running: they only run while mai is open.</p>
     </div>
   );
 }
@@ -258,6 +288,7 @@ export function SettingsView({
             <h2 id="set-other" className="label">
               other
             </h2>
+            {isTauri() && <LoginItemToggle />}
             <Toggle
               name="connectors"
               label="Let jobs use my connected accounts (Gmail, Slack, Drive, Atlassian…)"
