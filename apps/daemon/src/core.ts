@@ -13,6 +13,7 @@ import {
   PROTOCOL_VERSION,
   REMEMBERABLE_RULES,
   type ServerMessage,
+  type Usage,
 } from '@mai/protocol';
 import type { Store } from './store';
 
@@ -41,6 +42,8 @@ interface PendingApproval {
 const TERMINAL: JobStatus[] = ['done', 'failed', 'cancelled'];
 const LOGIN_POLL_MS = 3000;
 const WORKTREE_SWEEP_MS = 10 * 60_000;
+const USAGE_POLL_MS = 5 * 60_000;
+const USAGE_MIN_GAP_MS = 30_000;
 const LOGIN_TIMEOUT_MS = 10 * 60_000;
 
 const openWithSystem = (target: string) =>
@@ -72,6 +75,9 @@ export class Core {
   private auth: { state: AuthState; detail?: string } = { state: 'checking' };
   private loginTimer?: ReturnType<typeof setInterval>;
   private sweepTimer: ReturnType<typeof setInterval>;
+  private usageTimer: ReturnType<typeof setInterval>;
+  private usageState: Usage | null = null;
+  private usageCheckedAt = 0;
 
   constructor(private readonly opts: CoreOptions) {
     const { store } = opts;
@@ -96,6 +102,24 @@ export class Core {
     void this.sweepMergedWorktrees();
     this.sweepTimer = setInterval(() => void this.sweepMergedWorktrees(), WORKTREE_SWEEP_MS);
     this.sweepTimer.unref();
+    this.usageTimer = setInterval(() => void this.refreshUsage(true), USAGE_POLL_MS);
+    this.usageTimer.unref();
+  }
+
+  get usage(): Usage | null {
+    return this.usageState;
+  }
+
+  // Polled, and refreshed after each job; at most every 30 s unless forced by the timer.
+  async refreshUsage(force = false): Promise<void> {
+    if (!force && Date.now() - this.usageCheckedAt < USAGE_MIN_GAP_MS) return;
+    this.usageCheckedAt = Date.now();
+    try {
+      this.usageState = await this.opts.agent.usage();
+    } catch {
+      return;
+    }
+    this.broadcast({ v: PROTOCOL_VERSION, type: 'usage', usage: this.usageState });
   }
 
   get store(): Store {
@@ -452,12 +476,14 @@ export class Core {
     } finally {
       this.running.delete(job.id);
       this.schedule();
+      void this.refreshUsage();
     }
   }
 
   shutdown(): void {
     clearInterval(this.loginTimer);
     clearInterval(this.sweepTimer);
+    clearInterval(this.usageTimer);
     for (const state of this.running.values()) state.abort.abort();
     this.opts.agent.close();
   }

@@ -1,4 +1,4 @@
-import type { Report } from '@mai/protocol';
+import type { Report, Usage } from '@mai/protocol';
 import { isLoggedIn, openLoginTerminal } from './auth';
 import { type DeskContext, type DeskResult, FrontDesk } from './desk';
 import { summarize } from './report';
@@ -16,6 +16,7 @@ export interface Agent {
   runWorker(args: Omit<WorkerArgs, 'apiKeyMode' | 'headedBrowser'>): Promise<WorkerResult>;
   summarize(transcript: string): Promise<Report>;
   authState(): Promise<'logged_in' | 'logged_out' | 'api_key'>;
+  usage(): Promise<Usage | null>;
   openLogin(): void;
   close(): void;
 }
@@ -38,6 +39,7 @@ export function createAgent({
       return (await isLoggedIn()) ? 'logged_in' : 'logged_out';
     },
     openLogin: openLoginTerminal,
+    usage: () => (apiKeyMode ? Promise.resolve(null) : desk.usage()),
     close: () => desk.close(),
   };
 }

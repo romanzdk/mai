@@ -1,21 +1,73 @@
-import type { AuthState } from '@mai/protocol';
+import type { AuthState, Usage, UsageWindow } from '@mai/protocol';
 import { type RefObject, useEffect, useRef, useState } from 'react';
 import type { Connection } from './daemon';
-import { type ApprovalEvent, ago, type Exchange, type JobState, searchJobs } from './derive';
+import {
+  type ApprovalEvent,
+  ago,
+  type Exchange,
+  type JobCounts,
+  type JobState,
+  resetLabel,
+  searchJobs,
+  usageLevel,
+} from './derive';
 import { ApprovalCard, JobRow } from './job';
 import { type Act, Kbd, keyShortcut } from './ui';
+
+function UsageMeter({
+  label,
+  name,
+  w,
+  now,
+  extra = '',
+}: {
+  label: string;
+  name: string;
+  w: UsageWindow;
+  now: number;
+  extra?: string;
+}) {
+  const pct = w.pct ?? 0;
+  const resets = w.resetsAt ? resetLabel(w.resetsAt, now) : '';
+  return (
+    <span
+      className="meter"
+      data-level={usageLevel(w.pct)}
+      title={`${name}: ${w.pct ?? '?'}% used${resets ? `, resets ${resets}` : ''}${extra}`}
+    >
+      <span className="meter-label">{label}</span>
+      <span className="meter-bar" aria-hidden="true">
+        <span className="meter-fill" style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
+      </span>
+      <span className="meter-value">{w.pct === null ? '?' : `${Math.round(pct)}%`}</span>
+      {resets && <span className="meter-reset">↻ {resets}</span>}
+    </span>
+  );
+}
 
 export function TopBar({
   connection,
   inboxCount,
+  counts,
+  usage,
+  now,
   onInbox,
   onHistory,
 }: {
   connection: Connection;
   inboxCount: number;
+  counts: JobCounts;
+  usage: Usage | null;
+  now: number;
   onInbox: () => void;
   onHistory: () => void;
 }) {
+  const busy = [
+    counts.running > 0 && { k: 'running', text: `${counts.running} running` },
+    counts.queued > 0 && { k: 'queued', text: `${counts.queued} queued` },
+    counts.needsYou > 0 && { k: 'needs-you', text: `${counts.needsYou} needs you` },
+  ].filter((x): x is { k: string; text: string } => Boolean(x));
+  const clockDate = new Date(now);
   const ok = connection.status === 'connected';
   const details =
     connection.status === 'connected'
@@ -32,6 +84,51 @@ export function TopBar({
         {!ok && <span className="error"> · daemon {connection.status}</span>}
         <span className="sr-only">{ok ? ' daemon connected' : ''}</span>
       </span>
+      <span className="jobs-summary" data-testid="job-counts">
+        {busy.length === 0 ? (
+          <span className="muted">idle</span>
+        ) : (
+          busy.map((b) => (
+            <span key={b.k} className="count-chip" data-kind={b.k}>
+              {b.text}
+            </span>
+          ))
+        )}
+      </span>
+      <span className="topbar-spacer" />
+      {usage && (
+        <span className="usage" data-testid="usage">
+          <span className="sr-only">Claude plan usage: </span>
+          {usage.fiveHour && (
+            <UsageMeter label="5h" name="5-hour limit" w={usage.fiveHour} now={now} />
+          )}
+          {usage.week && (
+            <UsageMeter
+              label="week"
+              name="Weekly limit"
+              w={usage.week}
+              now={now}
+              extra={usage.models
+                .map((m) => `\n${m.name}: ${m.pct ?? '?'}% of its weekly limit`)
+                .join('')}
+            />
+          )}
+          {usage.credits && (
+            <span className="meter" title="Extra usage credits this month">
+              <span className="meter-label">credits</span>
+              <span className="meter-value">
+                {usage.credits.used.toFixed(2)} / {usage.credits.limit} {usage.credits.currency}
+              </span>
+            </span>
+          )}
+        </span>
+      )}
+      <time className="clock" dateTime={clockDate.toISOString()}>
+        <span className="clock-date">
+          {clockDate.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}
+        </span>{' '}
+        {clockDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+      </time>
       <nav className="topbar-links">
         <button
           type="button"
@@ -347,6 +444,39 @@ export function InboxView({
         </button>
       </div>
       <h1>Inbox</h1>
+      <InboxItems
+        approvals={approvals}
+        needsYou={needsYou}
+        act={act}
+        home={home}
+        now={now}
+        onOpenJob={onOpenJob}
+        onRetry={onRetry}
+      />
+    </div>
+  );
+}
+
+// Everything waiting for the user; shown in the home sidebar and in the inbox view.
+export function InboxItems({
+  approvals,
+  needsYou,
+  act,
+  home,
+  now,
+  onOpenJob,
+  onRetry,
+}: {
+  approvals: { approval: ApprovalEvent; job: JobState }[];
+  needsYou: JobState[];
+  act: Act;
+  home: string;
+  now: number;
+  onOpenJob: (id: string) => void;
+  onRetry: (id: string) => void;
+}) {
+  return (
+    <>
       {approvals.length === 0 && needsYou.length === 0 && (
         <p className="muted">Nothing is waiting for you.</p>
       )}
@@ -394,7 +524,7 @@ export function InboxView({
           </div>
         </section>
       ))}
-    </div>
+    </>
   );
 }
 

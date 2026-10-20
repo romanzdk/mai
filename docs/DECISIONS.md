@@ -214,3 +214,22 @@ screenshots of every state plus the code; their merged findings were implemented
 - Tokens: a mono stack that does not fall back to Courier, `--text-2`, `--muted` raised to
   6:1, `--edge` for control borders (3:1), size scale, 1200 px max width, a global focus ring,
   a polite live region, and zoom hotkeys.
+
+## 028 — Visual design "Violet Glass", status bar, inbox sidebar (2026-10-20)
+
+Three designers built competing directions in separate worktrees (glass, terminal, calm);
+the owner picked glass. The other two are kept on the `design/terminal` and `design/calm`
+branches, unmerged.
+
+The top bar doubles as the status bar: job counts (running, queued, needs you), Claude plan
+usage (5-hour and weekly percentage with reset time; amber at 80 %, red at 95 %; per-model
+buckets in the tooltip; paid extra credits only when they have a real limit) and a 24-hour
+clock with the date. Plan usage comes from the Agent SDK's `/usage` data on the warm desk
+session, polled every 5 minutes and after each job. The SDK marks that call experimental,
+so a failure keeps the last known numbers and never breaks anything; it is null in API-key
+mode. Home gets an always-visible inbox sidebar (approvals and needs-you items) that stacks
+above the board on windows narrower than 1180 px.
+
+The view stays pinned to the bottom unless the user scrolls up themselves: only wheel, touch,
+scrollbar drag and PageUp unpin it, because the browser's own scroll adjustments during
+reflow were unpinning it on resize.

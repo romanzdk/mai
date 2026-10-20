@@ -1,12 +1,13 @@
 import type { MaiEvent } from '@mai/protocol';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { setAttention, useDaemon } from './daemon';
-import { derive, isActive, type JobState } from './derive';
-import { ApprovalCard, JobRow, JobView } from './job';
+import { derive, isActive, type JobState, jobCounts } from './derive';
+import { JobRow, JobView } from './job';
 import {
   Conversation,
   EmptyState,
   HistoryView,
+  InboxItems,
   InboxView,
   InputBar,
   Notices,
@@ -44,13 +45,20 @@ function announcement(e: MaiEvent, jobs: Map<string, JobState>): string | undefi
 }
 
 export function App() {
-  const { connection, home, events, deltas, pending, auth, send, act, restart } = useDaemon();
+  const { connection, home, events, deltas, pending, auth, usage, send, act, restart } =
+    useDaemon();
   const { jobs, exchanges, approvals, needsYou } = useMemo(() => derive(events), [events]);
   const byId = useMemo(() => new Map(jobs.map((j) => [j.job.id, j])), [jobs]);
   const now = useNow(1000);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mainRef = useRef<HTMLElement>(null);
   const atBottom = useRef(true);
+  // Only the user's own scrolling may unpin the view; the browser also scrolls on its own
+  // while reflowing (scroll anchoring, clamping), and those events must not count.
+  const userScrollAt = useRef(0);
+  const userScrolled = () => {
+    userScrollAt.current = Date.now();
+  };
   const retrying = useRef<string | null>(null);
 
   const [stack, setStack] = useState<View[]>([HOME]);
@@ -99,6 +107,7 @@ export function App() {
         const main = mainRef.current;
         if (main) {
           e.preventDefault();
+          userScrollAt.current = Date.now();
           main.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * main.clientHeight });
         }
         return;
@@ -154,19 +163,23 @@ export function App() {
     atBottom.current = view.name === 'home';
     main.scrollTop = atBottom.current ? main.scrollHeight : 0;
   }, [view]);
+  // Re-pin when the box resizes and also when the content reflows taller (a narrower
+  // window wraps more lines without changing the scroll box itself).
+  const pin = useRef<ResizeObserver | null>(null);
   useLayoutEffect(() => {
     const main = mainRef.current;
-    if (main && atBottom.current) main.scrollTop = main.scrollHeight;
-  });
-  useEffect(() => {
-    const main = mainRef.current;
     if (!main) return;
-    const pin = new ResizeObserver(() => {
-      if (atBottom.current) main.scrollTop = main.scrollHeight;
-    });
-    pin.observe(main);
-    return () => pin.disconnect();
-  }, []);
+    if (!pin.current) {
+      pin.current = new ResizeObserver(() => {
+        if (atBottom.current) main.scrollTop = main.scrollHeight;
+      });
+      pin.current.observe(main);
+    }
+    const content = main.firstElementChild;
+    if (content) pin.current.observe(content);
+    if (atBottom.current) main.scrollTop = main.scrollHeight;
+  });
+  useEffect(() => () => pin.current?.disconnect(), []);
 
   const [announce, setAnnounce] = useState('');
   const announced = useRef(0);
@@ -200,7 +213,7 @@ export function App() {
       .concat([...finished].reverse())
       .map((j, i) => [j.job.id, i]),
   );
-  const homeTargetApproval = active.flatMap((j) => j.pendingApprovals)[0]?.approvalId;
+  const counts = jobCounts(jobs);
   const homeExchanges = exchanges.filter((e) => !e.aboutJobId).slice(-4);
   const homePending = pending.filter((p) => !p.aboutJobId);
   const history = exchanges.map((e) => e.text).reverse();
@@ -211,15 +224,22 @@ export function App() {
       <TopBar
         connection={connection}
         inboxCount={inboxCount}
+        counts={counts}
+        usage={usage}
+        now={now}
         onInbox={() => go({ name: 'inbox' })}
         onHistory={() => go({ name: 'history' })}
       />
       <main
         ref={mainRef}
         className="main"
+        onWheel={userScrolled}
+        onTouchMove={userScrolled}
+        onPointerDown={userScrolled}
         onScroll={(e) => {
           const el = e.currentTarget;
-          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          const near = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          if (near || Date.now() - userScrollAt.current < 600) atBottom.current = near;
         }}
       >
         {view.name === 'inbox' ? (
@@ -258,59 +278,64 @@ export function App() {
             />
           </JobView>
         ) : (
-          <div className="home">
-            <h1 className="sr-only">Home</h1>
-            {jobs.length === 0 && <EmptyState />}
-            <section className="board" data-testid="board" aria-label="jobs">
-              {finished.length > 0 && <h2 className="label">recent</h2>}
-              <ul className="list">
-                {finished.map((j) => (
-                  <li key={j.job.id}>
-                    <JobRow
-                      state={j}
-                      now={now}
-                      index={rowIndex.get(j.job.id)}
-                      onOpen={() => openJob(j.job.id)}
-                    />
-                  </li>
-                ))}
-              </ul>
-              <ul className="live">
-                {active.map((j) => (
-                  <li key={j.job.id}>
-                    {j.pendingApprovals.length > 0 ? (
-                      j.pendingApprovals.map((a) => (
-                        <ApprovalCard
-                          key={a.approvalId}
-                          approval={a}
-                          job={j}
-                          act={act}
-                          home={home}
-                          now={now}
-                          isTarget={a.approvalId === homeTargetApproval}
-                          onOpenJob={() => openJob(j.job.id)}
-                        />
-                      ))
-                    ) : (
+          <div className="home-layout">
+            <div className="home">
+              <h1 className="sr-only">Home</h1>
+              {jobs.length === 0 && <EmptyState />}
+              <section className="board" data-testid="board" aria-label="jobs">
+                {finished.length > 0 && <h2 className="label">recent</h2>}
+                <ul className="list">
+                  {finished.map((j) => (
+                    <li key={j.job.id}>
                       <JobRow
                         state={j}
                         now={now}
                         index={rowIndex.get(j.job.id)}
                         onOpen={() => openJob(j.job.id)}
                       />
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-            <Conversation
-              exchanges={homeExchanges}
-              deltas={deltas}
-              pending={homePending}
-              jobs={byId}
-              now={now}
-              onOpenJob={openJob}
-            />
+                    </li>
+                  ))}
+                </ul>
+                <ul className="live">
+                  {active.map((j) => (
+                    <li key={j.job.id}>
+                      <JobRow
+                        state={j}
+                        now={now}
+                        index={rowIndex.get(j.job.id)}
+                        onOpen={() => openJob(j.job.id)}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+              <Conversation
+                exchanges={homeExchanges}
+                deltas={deltas}
+                pending={homePending}
+                jobs={byId}
+                now={now}
+                onOpenJob={openJob}
+              />
+            </div>
+            <aside className="inbox-side" aria-label="inbox" data-testid="inbox-side">
+              <h2 className="label side-title">
+                inbox{inboxCount > 0 && <span className="count">{inboxCount}</span>}
+              </h2>
+              {inboxCount === 0 ? (
+                <p className="muted small">Nothing is waiting for you.</p>
+              ) : (
+                <InboxItems
+                  approvals={approvals}
+                  needsYou={needsYou}
+                  act={act}
+                  home={home}
+                  now={now}
+                  onOpenJob={openJob}
+                  onRetry={retry}
+                />
+              )}
+            </aside>
           </div>
         )}
       </main>

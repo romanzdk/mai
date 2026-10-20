@@ -209,6 +209,37 @@ export function duration(ms: number): string {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 }
 
+export interface JobCounts {
+  running: number;
+  queued: number;
+  needsYou: number;
+}
+
+export function jobCounts(jobs: JobState[]): JobCounts {
+  let running = 0;
+  let queued = 0;
+  let needsYou = 0;
+  for (const j of jobs) {
+    if (j.status === 'running') running++;
+    else if (j.status === 'queued') queued++;
+    if (statusLabel(j) === 'needs you') needsYou++;
+  }
+  return { running, queued, needsYou };
+}
+
+export const usageLevel = (pct: number | null): 'ok' | 'warn' | 'danger' =>
+  pct === null || pct < 80 ? 'ok' : pct < 95 ? 'warn' : 'danger';
+
+// "16:30" when the reset is within a day, otherwise "Sat 04:00".
+export function resetLabel(iso: string, now: number): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  return at.getTime() - now < 86_400_000
+    ? time
+    : `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+}
+
 export const shortPath = (path: string, home: string) =>
   home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path;
 

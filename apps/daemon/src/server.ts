@@ -54,6 +54,7 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
       home: core.home,
     });
     send({ v: PROTOCOL_VERSION, type: 'auth', ...core.authState });
+    send({ v: PROTOCOL_VERSION, type: 'usage', usage: core.usage });
     ws.on('message', (data) => {
       const msg = decode<ClientMessage>(data.toString());
       if (!msg) return;

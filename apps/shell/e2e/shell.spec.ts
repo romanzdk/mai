@@ -159,3 +159,20 @@ test('a mouse click on a button hands focus back to the input', async ({ page })
   await page.keyboard.type('dictated');
   await expect(input(page)).toHaveValue('dictated');
 });
+
+test('top bar shows job counts, plan usage and the clock; inbox sits in the sidebar', async ({
+  page,
+}) => {
+  await dispatch(page, 'job sidebar-me delete');
+  const bar = page.getByTestId('daemon-status');
+  await expect(bar.getByTestId('usage')).toContainText('42%');
+  await expect(bar.getByTestId('usage')).toContainText('18%');
+  await expect(bar.getByTestId('job-counts')).toContainText('needs you');
+  await expect(bar.locator('time.clock')).toHaveText(/\d{2}:\d{2}/);
+  const side = page.getByTestId('inbox-side');
+  await expect(side.getByTestId('approval').filter({ hasText: 'sidebar-me' })).toBeVisible();
+  const row = page.getByTestId('board').getByRole('button', { name: /sidebar-me/ });
+  await expect(row).toContainText('approve: rm -rf ~/Documents/old');
+  await side.getByRole('button', { name: 'Deny and stop job' }).first().click();
+  await expect(row).toContainText('failed');
+});

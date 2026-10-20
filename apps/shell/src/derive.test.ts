@@ -6,12 +6,15 @@ import {
   clock,
   derive,
   duration,
+  jobCounts,
   needsAttention,
   outsidePaths,
+  resetLabel,
   searchJobs,
   shortPath,
   statusLabel,
   timelineLine,
+  usageLevel,
 } from './derive';
 
 let id = 0;
@@ -192,4 +195,26 @@ test('approval context: what the agent said before, and remembered decisions', (
   expect(decided && timelineLine(decided, state.requested)).toBe(
     'auto-approved (you allowed this for the job): git push',
   );
+});
+
+test('status bar helpers: job counts, usage levels, reset labels', () => {
+  const { jobs } = derive([
+    ev('a', { kind: 'job_created', job: { ...job, id: 'a' } }),
+    ev('a', { kind: 'job_status', status: 'running' }),
+    ev('b', { kind: 'job_created', job: { ...job, id: 'b' } }),
+    ev('c', { kind: 'job_created', job: { ...job, id: 'c' } }),
+    ev('c', { kind: 'job_status', status: 'waiting_approval' }),
+  ]);
+  expect(jobCounts(jobs)).toEqual({ running: 1, queued: 1, needsYou: 1 });
+  expect([usageLevel(null), usageLevel(79), usageLevel(80), usageLevel(95)]).toEqual([
+    'ok',
+    'ok',
+    'warn',
+    'danger',
+  ]);
+  const now = new Date(2026, 9, 20, 12, 0).getTime();
+  expect(resetLabel(new Date(2026, 9, 20, 16, 30).toISOString(), now)).toBe('16:30');
+  expect(resetLabel(new Date(2026, 9, 24, 4, 0).toISOString(), now)).toMatch(/04:00$/);
+  expect(resetLabel(new Date(2026, 9, 24, 4, 0).toISOString(), now)).not.toBe('04:00');
+  expect(resetLabel('garbage', now)).toBe('');
 });

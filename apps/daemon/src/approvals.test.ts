@@ -238,3 +238,22 @@ test('open_path only opens artifacts listed in that job report', async () => {
   expect(core.openPath(id, '/etc/passwd')).toBe(false);
   expect(core.openPath('nope', 'https://example.com/x')).toBe(false);
 });
+
+test('plan usage is broadcast, and a failing usage call is ignored', async () => {
+  let fail = false;
+  const core = setup({
+    ...createFakeAgent(),
+    async usage() {
+      if (fail) throw new Error('experimental API changed');
+      return { fiveHour: { pct: 50, resetsAt: null }, models: [], checkedAt: 1 };
+    },
+  });
+  const seen: unknown[] = [];
+  core.subscribe((m) => m.type === 'usage' && seen.push(m.usage));
+  await core.refreshUsage(true);
+  expect(core.usage).toMatchObject({ fiveHour: { pct: 50 } });
+  fail = true;
+  await core.refreshUsage(true);
+  expect(core.usage).toMatchObject({ fiveHour: { pct: 50 } });
+  expect(seen).toHaveLength(1);
+});

@@ -41,7 +41,8 @@
   --radius: 8px;
   --radius-lg: 12px;
   --radius-xl: 14px;
-  --max-width: 1160px;
+  --max-width: 1440px;
+  --sidebar: 360px;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 
   color-scheme: dark;
@@ -1305,6 +1306,204 @@ ol {
 .search:focus {
   border-color: var(--accent);
   box-shadow: var(--ring), var(--shadow-1);
+}
+
+/* ---------- status bar (inside the top bar) ---------- */
+.jobs-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.count-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  background: rgb(255 255 255 / 0.05);
+  border: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.count-chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.count-chip[data-kind="running"]::before {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.count-chip[data-kind="needs-you"] {
+  color: var(--warn);
+  border-color: rgb(245 197 107 / 0.3);
+}
+
+.count-chip[data-kind="needs-you"]::before {
+  background: var(--warn);
+}
+
+.topbar-spacer {
+  flex: 1;
+}
+
+.usage {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 1.5);
+}
+
+.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.meter-label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+}
+
+.meter-bar {
+  position: relative;
+  width: 44px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.1);
+  overflow: hidden;
+}
+
+.meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-text));
+}
+
+.meter-value {
+  color: var(--text-2);
+}
+
+.meter[data-level="warn"] .meter-value,
+.meter[data-level="warn"] .meter-label {
+  color: var(--warn);
+}
+
+.meter[data-level="warn"] .meter-fill {
+  background: var(--warn);
+}
+
+.meter[data-level="danger"] .meter-value,
+.meter[data-level="danger"] .meter-label {
+  color: var(--danger);
+}
+
+.meter[data-level="danger"] .meter-fill {
+  background: var(--danger);
+}
+
+.meter-reset {
+  color: var(--muted);
+}
+
+.clock {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  padding-left: calc(var(--space) * 1.5);
+  border-left: 1px solid var(--hairline-2);
+}
+
+.clock-date {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* ---------- home with inbox sidebar ---------- */
+.home-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--sidebar);
+  gap: calc(var(--space) * 3);
+  min-height: 100%;
+}
+
+.inbox-side {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100dvh - 200px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 1.5);
+  padding: calc(var(--space) * 2);
+  background: var(--glass), var(--glass-solid);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.side-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inbox-side .approval,
+.inbox-side .needs-you {
+  padding: calc(var(--space) * 1.5);
+}
+
+.inbox-side .facts {
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+
+.inbox-side .facts dd {
+  margin-bottom: 6px;
+}
+
+@media (max-width: 1180px) {
+  .home-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inbox-side {
+    position: static;
+    max-height: none;
+    order: -1;
+  }
+
+  .meter-reset,
+  .clock-date {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .jobs-summary .count-chip:not([data-kind="needs-you"]) {
+    display: none;
+  }
+
+  .meter-bar {
+    display: none;
+  }
 }
 
 @media (max-width: 720px) {

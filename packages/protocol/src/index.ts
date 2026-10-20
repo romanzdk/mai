@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 // Rules whose approval may be remembered for the rest of a job. Never the ones that can lose
 // data or money: one remembered delete would silently allow any later delete in that job.
@@ -69,6 +69,22 @@ export type EventBody =
     }
   | { kind: 'inbox_dismissed' };
 
+// Claude plan limits, as Claude Code's /usage reports them. Null when they do not apply
+// (API-key mode) or could not be read.
+export interface UsageWindow {
+  pct: number | null;
+  resetsAt: string | null;
+}
+
+export interface Usage {
+  fiveHour?: UsageWindow;
+  week?: UsageWindow;
+  models: (UsageWindow & { name: string })[];
+  // Paid extra usage beyond the plan, only when it has a real monthly limit.
+  credits?: { used: number; limit: number; currency: string };
+  checkedAt: number;
+}
+
 export type ApprovalDecision = 'approved' | 'denied' | 'expired';
 
 export type MaiEvent = EventBody & { id: number; ts: number; jobId: string | null };
@@ -94,7 +110,8 @@ export type ServerMessage =
   | Msg<'event', { event: MaiEvent }>
   // Streaming front-desk text; not persisted, the final text arrives as a desk_reply event.
   | Msg<'desk_delta', { inputId: string; text: string }>
-  | Msg<'auth', { state: AuthState; detail?: string }>;
+  | Msg<'auth', { state: AuthState; detail?: string }>
+  | Msg<'usage', { usage: Usage | null }>;
 
 export const encode = (msg: ClientMessage | ServerMessage): string => JSON.stringify(msg);
 

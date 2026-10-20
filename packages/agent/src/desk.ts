@@ -1,5 +1,5 @@
 import { type Query, query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Job, Report } from '@mai/protocol';
+import type { Job, Report, Usage, UsageWindow } from '@mai/protocol';
 import { type DeskOutput, parseDeskOutput, visibleReply } from './parse';
 import { DESK_MODEL, ISOLATED, sdkEnv } from './sdk';
 
@@ -149,6 +149,40 @@ export class FrontDesk {
     const result = this.chain.then(run, run);
     this.chain = result.catch(() => {});
     return result;
+  }
+
+  // Rides on the warm desk session. The SDK marks this API experimental, so callers treat a
+  // failure as "unknown" rather than an error.
+  async usage(): Promise<Usage | null> {
+    this.start();
+    const r = await this.q?.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({
+      skipBehaviors: true,
+    });
+    if (!r?.rate_limits_available || !r.rate_limits) return null;
+    const win = (w?: { utilization: number | null; resets_at: string | null } | null) =>
+      w ? { pct: w.utilization, resetsAt: w.resets_at } : undefined;
+    const fiveHour: UsageWindow | undefined = win(r.rate_limits.five_hour);
+    const week: UsageWindow | undefined = win(r.rate_limits.seven_day);
+    const extra = r.rate_limits.extra_usage;
+    return {
+      ...(fiveHour ? { fiveHour } : {}),
+      ...(week ? { week } : {}),
+      ...(extra?.is_enabled && extra.monthly_limit
+        ? {
+            credits: {
+              used: extra.used_credits ?? 0,
+              limit: extra.monthly_limit,
+              currency: extra.currency ?? '',
+            },
+          }
+        : {}),
+      models: (r.rate_limits.model_scoped ?? []).map((m) => ({
+        name: m.display_name,
+        pct: m.utilization,
+        resetsAt: m.resets_at,
+      })),
+      checkedAt: Date.now(),
+    };
   }
 
   close(): void {

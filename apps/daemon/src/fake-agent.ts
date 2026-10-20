@@ -39,6 +39,15 @@ export function createFakeAgent(): Agent {
       return 'logged_in';
     },
     openLogin() {},
+    async usage() {
+      const inHours = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
+      return {
+        fiveHour: { pct: 42, resetsAt: inHours(2) },
+        week: { pct: 18, resetsAt: inHours(80) },
+        models: [{ name: 'Opus', pct: 31, resetsAt: inHours(80) }],
+        checkedAt: Date.now(),
+      };
+    },
     close() {},
   };
 }

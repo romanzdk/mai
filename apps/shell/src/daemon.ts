@@ -6,6 +6,7 @@ import {
   type MaiEvent,
   PROTOCOL_VERSION,
   type ServerMessage,
+  type Usage,
 } from '@mai/protocol';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -42,6 +43,7 @@ export interface Daemon {
     queued: boolean;
   }[];
   auth: { state: AuthState; detail?: string };
+  usage: Usage | null;
   // Requests queue until connected, so nothing typed or dictated is lost. Actions do not:
   // a late approve could act on stale state, so act returns false when it sent nothing.
   send: (text: string, aboutJobId?: string) => void;
@@ -66,6 +68,7 @@ export function useDaemon(): Daemon {
   const [deltas, setDeltas] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<Daemon['pending']>([]);
   const [auth, setAuth] = useState<{ state: AuthState; detail?: string }>({ state: 'checking' });
+  const [usage, setUsage] = useState<Usage | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const lastId = useRef(0);
   const outbox = useRef<ClientMessage[]>([]);
@@ -112,6 +115,8 @@ export function useDaemon(): Daemon {
           onEvent(msg.event);
         } else if (msg?.type === 'desk_delta') {
           setDeltas((d) => ({ ...d, [msg.inputId]: msg.text }));
+        } else if (msg?.type === 'usage') {
+          setUsage(msg.usage);
         } else if (msg?.type === 'auth') {
           setAuth({ state: msg.state, ...(msg.detail ? { detail: msg.detail } : {}) });
         }
@@ -202,5 +207,5 @@ export function useDaemon(): Daemon {
     if (isTauri()) void invoke('restart_daemon').catch(() => {});
   }, []);
 
-  return { connection, home, events, deltas, pending, auth, send, act, restart };
+  return { connection, home, events, deltas, pending, auth, usage, send, act, restart };
 }

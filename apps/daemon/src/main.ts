@@ -57,7 +57,7 @@ const core = new Core({
 const server = await startServer({ token, core, port: Number(env.MAI_PORT ?? 0) });
 // The Tauri host parses this line to learn the port; keep the format in sync with lib.rs.
 console.log(`MAI_DAEMON_READY ${JSON.stringify({ port: server.port })}`);
-void core.checkAuth();
+void core.checkAuth().then(() => core.refreshUsage(true));
 
 const shutdown = () => {
   core.shutdown();
