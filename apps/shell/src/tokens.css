@@ -6,6 +6,7 @@
   --muted: #7d838f;
   --accent: #4fd1a5;
   --danger: #f2706b;
+  --warn: #e8c46a;
 
   --font: system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif;
   --mono: ui-monospace, "SF Mono", "Ubuntu Mono", monospace;
@@ -33,25 +34,55 @@ body {
   font-size: 15px;
 }
 
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.mono,
+.status,
+.label,
+.job-status,
+.timeline {
+  font-family: var(--mono);
+}
+
+.error {
+  color: var(--danger);
+}
+
+.label {
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: calc(var(--space) * 2) 0 var(--space);
+}
+
 .app {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: calc(var(--space) * 4);
+  padding: calc(var(--space) * 3) calc(var(--space) * 4);
+  gap: calc(var(--space) * 2);
 }
 
 .main {
   flex: 1;
-  display: grid;
-  place-items: center;
-  font-family: var(--mono);
-  font-size: 48px;
-  color: var(--muted);
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 3);
 }
 
 .status {
-  font-family: var(--mono);
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
   display: flex;
   gap: calc(var(--space) * 2);
@@ -68,4 +99,161 @@ body {
 .dot[data-state="exited"],
 .dot[data-state="disconnected"] {
   color: var(--danger);
+}
+
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.job {
+  display: grid;
+  grid-template-columns: 9ch minmax(12ch, 28ch) 1fr;
+  gap: calc(var(--space) * 2);
+  align-items: baseline;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: var(--space) calc(var(--space) * 1.5);
+  cursor: pointer;
+}
+
+.job:hover,
+.job:focus-visible {
+  border-color: var(--border);
+  outline: none;
+}
+
+.job-title,
+.job-line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.job-line {
+  color: var(--muted);
+}
+
+.job-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+[data-status="running"] .job-status,
+.job-status[data-status="running"] {
+  color: var(--accent);
+}
+
+[data-status="waiting_approval"],
+[data-status="waiting_input"] {
+  border-color: var(--warn);
+}
+
+[data-status="failed"] .job-status,
+.job-status[data-status="failed"] {
+  color: var(--danger);
+}
+
+.conversation {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 1.5);
+}
+
+.exchange .you {
+  color: var(--muted);
+}
+
+.exchange .you::before {
+  content: "› ";
+  color: var(--accent);
+}
+
+.exchange .desk {
+  white-space: pre-wrap;
+  padding-left: 2ch;
+}
+
+.input-bar input {
+  width: 100%;
+  font: inherit;
+  font-size: 22px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: calc(var(--space) * 2);
+  outline: none;
+}
+
+.input-bar input:focus {
+  border-color: var(--accent);
+}
+
+.job-view {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 2);
+}
+
+.job-view-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: calc(var(--space) * 2);
+}
+
+.job-view-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.link {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.report {
+  background: var(--surface);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: calc(var(--space) * 1.5) calc(var(--space) * 2);
+}
+
+.report p {
+  margin: 0;
+}
+
+.report ul {
+  margin: 4px 0 0;
+  padding-left: 2ch;
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.timeline li {
+  display: grid;
+  grid-template-columns: 10ch 1fr;
+  gap: calc(var(--space) * 2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.timeline li[data-kind="job_text"] {
+  font-family: var(--font);
 }

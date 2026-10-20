@@ -8,7 +8,8 @@
     "build:web": "vite build",
     "tauri": "tauri",
     "typecheck": "tsc -p .",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "test": "vitest run"
   },
   "dependencies": {
     "@mai/protocol": "workspace:*",

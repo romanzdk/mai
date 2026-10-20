@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -46,8 +47,20 @@ fn daemon_info(daemon: State<Daemon>) -> Option<DaemonInfo> {
     daemon.info.lock().unwrap().clone()
 }
 
+fn daemon_script(app: &AppHandle) -> tauri::Result<PathBuf> {
+    // Dev runs the build next to its node_modules so the external Agent SDK resolves.
+    // Release packaging of the SDK is still open (docs/DECISIONS.md 013).
+    if cfg!(debug_assertions) {
+        return Ok(PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../daemon/dist/daemon.mjs"
+        )));
+    }
+    Ok(app.path().resource_dir()?.join("daemon.mjs"))
+}
+
 fn spawn_daemon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let script = app.path().resource_dir()?.join("daemon.mjs");
+    let script = daemon_script(app)?;
     let token = random_token()?;
     let (mut rx, child) = app
         .shell()
@@ -55,6 +68,7 @@ fn spawn_daemon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .arg(script)
         .env("MAI_TOKEN", &token)
         .env("MAI_EXIT_ON_STDIN_EOF", "1")
+        .env("MAI_DATA_DIR", app.path().app_data_dir()?)
         .spawn()?;
     *app.state::<Daemon>().child.lock().unwrap() = Some(child);
 
