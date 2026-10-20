@@ -25,11 +25,10 @@ export function TopBar({
       : `daemon ${connection.status}`;
   return (
     <header className="topbar" data-testid="daemon-status">
-      <span title={details}>
-        <span className="dot" data-state={connection.status} aria-hidden="true">
-          ●
-        </span>{' '}
+      <span className="brand" title={details}>
+        <span className="logo" aria-hidden="true" />
         mai
+        <span className="dot" data-state={connection.status} aria-hidden="true" />
         {!ok && <span className="error"> · daemon {connection.status}</span>}
         <span className="sr-only">{ok ? ' daemon connected' : ''}</span>
       </span>
@@ -51,7 +50,14 @@ export function TopBar({
           aria-keyshortcuts={keyShortcut('I')}
           onClick={onInbox}
         >
-          inbox{inboxCount > 0 ? ` ${inboxCount}` : ''} <Kbd k="I" />
+          inbox
+          {inboxCount > 0 && (
+            <>
+              {' '}
+              <span className="count">{inboxCount}</span>
+            </>
+          )}{' '}
+          <Kbd k="I" />
         </button>
       </nav>
     </header>
@@ -136,6 +142,7 @@ export function Notices({
 export function EmptyState() {
   return (
     <div className="empty">
+      <span className="logo logo-lg" aria-hidden="true" />
       <p>Type what you want done. Jobs run in the background and report back here.</p>
       <p className="muted">
         Deleting files outside a job's folder, sudo, git push, and buying or sending things on
@@ -303,6 +310,9 @@ export function InputBar({
         autoComplete="off"
         spellCheck={false}
       />
+      <span className="send-hint kbd" aria-hidden="true">
+        ↵
+      </span>
     </form>
   );
 }
@@ -417,31 +427,37 @@ export function HistoryView({
         </span>
       </div>
       <h1>History</h1>
-      <input
-        className="search"
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setSelected(0);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-            e.preventDefault();
-            const by = e.key === 'ArrowDown' ? 1 : -1;
-            setSelected(Math.min(found.length - 1, Math.max(0, sel + by)));
-          } else if (e.key === 'Enter' && found[sel]) {
-            onOpenJob(found[sel].job.id);
-          } else if (e.key === 'Escape' && query) {
-            e.stopPropagation();
-            setQuery('');
-          }
-        }}
-        placeholder="Search titles, instructions, folders and reports · ↑↓ Enter"
-        aria-label="search jobs"
-        // biome-ignore lint/a11y/noAutofocus: the view exists to type a search
-        autoFocus
-      />
-      <ul className="board">
+      <div className="search-wrap">
+        <svg className="search-icon" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.75" />
+          <path d="m10.5 10.5 3.25 3.25" />
+        </svg>
+        <input
+          className="search"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setSelected(0);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              const by = e.key === 'ArrowDown' ? 1 : -1;
+              setSelected(Math.min(found.length - 1, Math.max(0, sel + by)));
+            } else if (e.key === 'Enter' && found[sel]) {
+              onOpenJob(found[sel].job.id);
+            } else if (e.key === 'Escape' && query) {
+              e.stopPropagation();
+              setQuery('');
+            }
+          }}
+          placeholder="Search titles, instructions, folders and reports · ↑↓ Enter"
+          aria-label="search jobs"
+          // biome-ignore lint/a11y/noAutofocus: the view exists to type a search
+          autoFocus
+        />
+      </div>
+      <ul className="board list">
         {found.map((j, i) => (
           <li key={j.job.id} data-selected={i === sel} className="history-row">
             <JobRow state={j} now={now} onOpen={() => onOpenJob(j.job.id)} />

@@ -263,7 +263,7 @@ export function App() {
             {jobs.length === 0 && <EmptyState />}
             <section className="board" data-testid="board" aria-label="jobs">
               {finished.length > 0 && <h2 className="label">recent</h2>}
-              <ul>
+              <ul className="list">
                 {finished.map((j) => (
                   <li key={j.job.id}>
                     <JobRow
@@ -275,7 +275,7 @@ export function App() {
                   </li>
                 ))}
               </ul>
-              <ul>
+              <ul className="live">
                 {active.map((j) => (
                   <li key={j.job.id}>
                     {j.pendingApprovals.length > 0 ? (
