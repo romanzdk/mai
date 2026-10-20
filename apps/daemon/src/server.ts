@@ -46,7 +46,13 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
     let unsubscribe: (() => void) | undefined;
     ws.on('close', () => unsubscribe?.());
 
-    send({ v: PROTOCOL_VERSION, type: 'hello', daemonVersion: pkg.version, startedAt });
+    send({
+      v: PROTOCOL_VERSION,
+      type: 'hello',
+      daemonVersion: pkg.version,
+      startedAt,
+      home: core.home,
+    });
     send({ v: PROTOCOL_VERSION, type: 'auth', ...core.authState });
     ws.on('message', (data) => {
       const msg = decode<ClientMessage>(data.toString());
@@ -89,6 +95,9 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
           break;
         case 'dismiss':
           void core.dismiss(String(msg.jobId));
+          break;
+        case 'open_path':
+          core.openPath(String(msg.jobId), String(msg.path));
           break;
         case 'open_folder':
           core.openFolder(String(msg.jobId));

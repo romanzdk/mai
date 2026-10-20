@@ -1,27 +1,38 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
+
+const input = (page: Page) => page.getByLabel('request');
+
+async function say(page: Page, text: string) {
+  await input(page).fill(text);
+  await input(page).press('Enter');
+}
+
+async function dispatch(page: Page, text: string) {
+  await page.goto('/');
+  await say(page, text);
+  return page
+    .getByTestId('board')
+    .getByRole('button', { name: new RegExp(text) })
+    .first();
+}
 
 test('shows the daemon as connected with a ping round-trip', async ({ page }) => {
   await page.goto('/');
   const status = page.getByTestId('daemon-status');
   await expect(status).toContainText('daemon connected');
-  await expect(status).toContainText(/rtt \d+ ms/, { timeout: 5000 });
+  await expect(status.locator('[title]').first()).toHaveAttribute('title', /rtt \d+ ms/, {
+    timeout: 5000,
+  });
 });
 
 test('a question gets a desk answer', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('request').fill('what time is it');
-  await page.getByLabel('request').press('Enter');
+  await say(page, 'what time is it');
   await expect(page.getByTestId('conversation')).toContainText('echo: what time is it');
 });
 
 test('a dispatched job shows on the board and opens with its report', async ({ page }) => {
-  await page.goto('/');
-  await page.getByLabel('request').fill('run a job please');
-  await page.getByLabel('request').press('Enter');
-  const row = page
-    .getByTestId('board')
-    .getByRole('button', { name: /run a job please/ })
-    .first();
+  const row = await dispatch(page, 'run a job please');
   await expect(row).toContainText('done');
   await row.click();
   await expect(page.getByTestId('report')).toContainText('Fake report.');
@@ -30,80 +41,121 @@ test('a dispatched job shows on the board and opens with its report', async ({ p
   await expect(page.getByTestId('board')).toBeVisible();
 });
 
-async function dispatch(page: import('@playwright/test').Page, text: string) {
-  await page.goto('/');
-  await page.getByLabel('request').fill(text);
-  await page.getByLabel('request').press('Enter');
-  return page
-    .getByTestId('board')
-    .getByRole('button', { name: new RegExp(text) })
-    .first();
-}
-
 test('a risky step waits for approval; approving lets it finish', async ({ page }) => {
-  const row = await dispatch(page, 'job approve-me delete');
-  await expect(row).toContainText('waiting approval');
+  await dispatch(page, 'job approve-me delete');
   const card = page.getByTestId('approval').filter({ hasText: 'approve-me' });
   await expect(card).toContainText('rm -rf ~/Documents/old');
+  await expect(card).toContainText('You asked');
+  await expect(card).toContainText('Outside the job folder: ~/Documents/old');
+  await expect(card).toContainText('Deletes permanently');
+  await expect(card.getByRole('checkbox')).toHaveCount(0);
   await card.getByRole('button', { name: 'Approve', exact: true }).click();
-  await expect(row).toContainText('done');
   await expect(card).toHaveCount(0);
+  const row = page.getByTestId('board').getByRole('button', { name: /approve-me/ });
+  await expect(row).toContainText('done');
 });
 
-test('denying fails the job with a clear reason', async ({ page }) => {
-  const row = await dispatch(page, 'job deny-me delete');
+test('denying stops the job and says why', async ({ page }) => {
+  await dispatch(page, 'job deny-me delete');
   await page
     .getByTestId('approval')
     .filter({ hasText: 'deny-me' })
-    .getByRole('button', { name: 'Deny', exact: true })
+    .getByRole('button', { name: 'Deny and stop job', exact: true })
     .click();
+  const row = page.getByTestId('board').getByRole('button', { name: /deny-me/ });
   await expect(row).toContainText('failed');
   await row.click();
-  await expect(page.locator('p.error')).toHaveText('you denied: rm -rf ~/Documents/old');
+  await expect(page.locator('.stopped')).toHaveText('Stopped: you denied: rm -rf ~/Documents/old');
 });
 
-test('cancel stops a running job and retry runs it again', async ({ page }) => {
+test('cancel stops a running job and retry opens the new run', async ({ page }) => {
   const row = await dispatch(page, 'job cancel-me slow');
   await expect(row).toContainText('running');
   await row.click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(page.locator('.job-view-head')).toContainText('cancelled');
+  await expect(page.locator('.stopped')).toHaveText('Cancelled by you.');
   await page.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(page.locator('.meta')).toContainText('running');
+  await expect(page.locator('.meta')).toContainText('retry of');
   await page.keyboard.press('Escape');
   await expect(
     page.getByTestId('board').getByRole('button', { name: /cancel-me slow/ }),
   ).toHaveCount(2);
 });
 
-test('the inbox lists pending approvals', async ({ page }) => {
+test('the inbox lists pending approvals and closes when emptied', async ({ page }) => {
   await dispatch(page, 'job inbox-me delete');
   await page.getByRole('button', { name: /^inbox [1-9]/ }).click();
   const card = page.getByTestId('inbox').getByTestId('approval').filter({ hasText: 'inbox-me' });
   await expect(card).toBeVisible();
-  await card.getByRole('button', { name: 'Deny', exact: true }).click();
-  await expect(card).toHaveCount(0);
+  for (const deny of await page.getByRole('button', { name: 'Deny and stop job' }).all()) {
+    await deny.click();
+  }
+  await expect(page.getByTestId('board')).toBeVisible();
 });
 
-test('ask a follow-up about a finished job', async ({ page }) => {
+test('in a job view the input asks about that job', async ({ page }) => {
   const row = await dispatch(page, 'job followup-target');
   await expect(row).toContainText('done');
   await row.click();
-  await page.getByRole('button', { name: 'Ask follow-up', exact: true }).click();
   await expect(page.getByTestId('about-chip')).toContainText('job followup-target');
-  await page.getByLabel('request').fill('what changed?');
-  await page.getByLabel('request').press('Enter');
-  await expect(page.getByTestId('conversation')).toContainText(
-    'about job followup-target · what changed?',
-  );
-  await expect(page.getByTestId('about-chip')).toHaveCount(0);
+  await say(page, 'what changed?');
+  const thread = page.locator('.job-view').getByTestId('conversation');
+  await expect(thread).toContainText('what changed?');
+  await expect(thread).toContainText('echo: what changed?');
 });
 
-test('history search finds old jobs by any word', async ({ page }) => {
+test('history search finds old jobs by any word, arrows and Enter open one', async ({ page }) => {
   await expect(await dispatch(page, 'job history-alpha')).toContainText('done');
   await expect(await dispatch(page, 'job history-beta')).toContainText('done');
   await page.getByRole('button', { name: 'history', exact: true }).click();
   await page.getByLabel('search jobs').fill('history-beta');
   const results = page.getByTestId('history').getByRole('button', { name: /history-/ });
   await expect(results).toHaveCount(1);
-  await expect(results).toContainText('history-beta');
+  await page.getByLabel('search jobs').press('Enter');
+  await expect(page.locator('.job-view h1')).toHaveText('job history-beta');
+});
+
+test('keyboard: approve with Mod+Y, open a row with Mod+1, focus returns to the input', async ({
+  page,
+}) => {
+  await dispatch(page, 'job key-approve delete');
+  const card = page.getByTestId('approval').filter({ hasText: 'key-approve' });
+  await expect(card.getByRole('button', { name: 'Approve', exact: true })).toBeEnabled();
+  await page.keyboard.press('ControlOrMeta+y');
+  await expect(card).toHaveCount(0);
+
+  const row = page.getByTestId('board').getByRole('button', { name: /key-approve/ });
+  const key = (await row.locator('.job-key').textContent())?.trim();
+  expect(key).toMatch(/^[1-9]$/);
+  await page.keyboard.press(`ControlOrMeta+${key}`);
+  await expect(page.locator('.job-view h1')).toHaveText('job key-approve delete');
+  await page.locator('.job-view h1').click();
+  await page.keyboard.press('Escape');
+  await expect(input(page)).toBeFocused();
+
+  await page.getByTestId('board').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.type('hello');
+  await expect(input(page)).toBeFocused();
+  await expect(input(page)).toHaveValue(/hello$/);
+});
+
+test('arrow up recalls earlier requests; Shift+Enter makes a new line', async ({ page }) => {
+  await page.goto('/');
+  await say(page, 'first request');
+  await expect(page.getByTestId('conversation')).toContainText('echo: first request');
+  await input(page).press('ArrowUp');
+  await expect(input(page)).toHaveValue('first request');
+  await input(page).fill('line one');
+  await input(page).press('Shift+Enter');
+  await input(page).pressSequentially('line two');
+  await expect(input(page)).toHaveValue('line one\nline two');
+});
+
+test('a mouse click on a button hands focus back to the input', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /^inbox/ }).click();
+  await expect(input(page)).toBeFocused();
+  await page.keyboard.type('dictated');
+  await expect(input(page)).toHaveValue('dictated');
 });

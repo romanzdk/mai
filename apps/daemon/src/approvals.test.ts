@@ -205,3 +205,36 @@ test('login opens the terminal and polls until signed in', async () => {
   expect(seen).toEqual(['logged_out', 'login_started', 'logged_in']);
   expect(core.authState.state).toBe('logged_in');
 });
+
+test('"remember" is ignored for rules that can lose data', async () => {
+  const req = { ruleId: 'delete', reason: 'deletes files', tool: 'Bash', command: 'rm -rf ~/a' };
+  const agent: Agent = {
+    ...createFakeAgent(),
+    async runWorker({ requestApproval }) {
+      await requestApproval(req);
+      await requestApproval({ ...req, command: 'rm -rf ~/everything' });
+      return { ok: true, result: 'r', transcript: 't' };
+    },
+  };
+  const core = setup(agent);
+  await core.handleInput('i', 'a job');
+  await settle();
+  core.decide(pendingApproval(core)?.approvalId ?? '', 'approved', 'you', true);
+  await settle();
+  expect(pendingApproval(core)).toMatchObject({ command: 'rm -rf ~/everything' });
+  expect(events(core).find((e) => e.kind === 'approval_decided')).not.toHaveProperty('remember');
+});
+
+test('open_path only opens artifacts listed in that job report', async () => {
+  const core = setup({
+    ...createFakeAgent(),
+    async summarize() {
+      return { summary: 's', changes: [], artifacts: ['https://example.com/x'], needs_you: [] };
+    },
+  });
+  await core.handleInput('i', 'a job');
+  await settle();
+  const id = onlyJob(core);
+  expect(core.openPath(id, '/etc/passwd')).toBe(false);
+  expect(core.openPath('nope', 'https://example.com/x')).toBe(false);
+});

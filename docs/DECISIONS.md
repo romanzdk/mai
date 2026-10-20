@@ -187,3 +187,30 @@ commit signing: if signing fails they leave changes uncommitted.
 instructions, folder, branch, report and last 15 steps, and dispatches more work into the same
 folder. History search filters all jobs client-side (title, instructions, folder, branch,
 report). ponytail: the UI loads every event on connect; page by job when that gets slow.
+
+## 027 — UX review pass (2026-10-20)
+
+Four review agents (keyboard flow, visual hierarchy, trust and states, accessibility) looked at
+screenshots of every state plus the code; their merged findings were implemented:
+
+- Focus rests in the input (dictation types into whatever is focused): it returns after
+  mouse clicks, Esc and view changes; typing anywhere lands in it. Requests typed while
+  disconnected are queued and sent on connect; approvals and other actions never queue.
+- Shortcuts are Cmd (macOS) / Ctrl (Linux) chords, shown next to their buttons: Y approve,
+  N deny, I inbox, F history, `.` cancel, R retry, O open folder, D dismiss, 1–9 open a
+  row. Single letters are avoided because dictation types plain characters. Esc goes back one
+  view (or clears a history search first).
+- Approval cards show what the user asked, what the agent said before asking, the job
+  folder, paths outside it, and the consequence; Approve is disabled for 1 s and shows
+  progress; Deny reads "Deny and stop job". "Remember" is only offered (and only honoured by
+  the daemon) for `REMEMBERABLE_RULES` (git push, page code), scoped to the job — one
+  remembered delete would otherwise allow every later delete in that job.
+- Home is bottom-anchored like a terminal: recent → active (approval cards replace their
+  row) → conversation → input. Rows show status in colour, "needs you", elapsed time and a
+  stale warning after 90 s. Failed jobs the user did not deny go to the inbox.
+- The tray shows the waiting count, the window title carries it, and the dock/taskbar asks
+  for attention when something new waits while mai is hidden or unfocused. A Restart button
+  appears when the daemon exits.
+- Tokens: a mono stack that does not fall back to Courier, `--text-2`, `--muted` raised to
+  6:1, `--edge` for control borders (3:1), size scale, 1200 px max width, a global focus ring,
+  a polite live region, and zoom hotkeys.

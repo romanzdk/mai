@@ -1,6 +1,18 @@
 import type { EventBody, Job, MaiEvent } from '@mai/protocol';
 import { expect, test } from 'vitest';
-import { derive, searchJobs } from './derive';
+import {
+  agentSaid,
+  ago,
+  clock,
+  derive,
+  duration,
+  needsAttention,
+  outsidePaths,
+  searchJobs,
+  shortPath,
+  statusLabel,
+  timelineLine,
+} from './derive';
 
 let id = 0;
 const ev = (jobId: string | null, body: EventBody): MaiEvent => ({
@@ -114,4 +126,70 @@ test('history search matches every word across title, prompt and report', () => 
   expect(ids('NVME.MD')).toEqual(['j1']);
   expect(ids('mai/j2')).toEqual(['j2']);
   expect(ids('samsung workflow')).toEqual([]);
+});
+
+test('time helpers', () => {
+  expect(clock(new Date(2026, 0, 1, 9, 5, 7).getTime())).toBe('09:05:07');
+  expect([ago(5_000), ago(125_000), ago(3 * 3600_000), ago(50 * 3600_000)]).toEqual([
+    '5s',
+    '2m',
+    '3h',
+    '2d',
+  ]);
+  expect([duration(41_000), duration(134_000), duration(3_900_000)]).toEqual([
+    '41s',
+    '2m 14s',
+    '1h 5m',
+  ]);
+});
+
+test('paths are shown with ~ and outside-folder targets are found', () => {
+  expect(shortPath('/Users/me/mai/jobs/a', '/Users/me')).toBe('~/mai/jobs/a');
+  expect(shortPath('/Users/meme/x', '/Users/me')).toBe('/Users/meme/x');
+  const cwd = '/Users/me/mai/jobs/a';
+  expect(outsidePaths('rm -rf ~/Documents/old', cwd, '/Users/me')).toEqual(['~/Documents/old']);
+  expect(outsidePaths(`rm -rf ${cwd}/build ${cwd}`, cwd, '/Users/me')).toEqual([]);
+  expect(outsidePaths('rm "/etc/hosts" 2>/dev/null', cwd, '/Users/me')).toEqual(['/etc/hosts']);
+  expect(outsidePaths('git push origin main', cwd, '/Users/me')).toEqual([]);
+});
+
+test('failed jobs need attention unless you denied them; status labels follow', () => {
+  const base = (status: Parameters<typeof ev>[1]) =>
+    derive([ev('j1', { kind: 'job_created', job }), ev('j1', status)]).jobs[0];
+  const failed = base({ kind: 'job_status', status: 'failed', error: 'boom' });
+  const denied = base({ kind: 'job_status', status: 'failed', error: 'you denied: rm x' });
+  const waiting = base({ kind: 'job_status', status: 'waiting_approval' });
+  expect(failed && needsAttention(failed)).toBe(true);
+  expect(denied && needsAttention(denied)).toBe(false);
+  expect(waiting && statusLabel(waiting)).toBe('needs you');
+  expect(failed && statusLabel(failed)).toBe('failed');
+  expect(failed?.finishedAt).toBeGreaterThan(0);
+});
+
+test('approval context: what the agent said before, and remembered decisions', () => {
+  const ask = {
+    kind: 'approval_requested',
+    approvalId: 'a1',
+    ruleId: 'git-push',
+    tool: 'Bash',
+    command: 'git push',
+    reason: 'pushes',
+  } as const;
+  const [state] = derive([
+    ev('j1', { kind: 'job_created', job }),
+    ev('j1', { kind: 'job_text', text: 'Tests pass, publishing.\nmore' }),
+    ev('j1', ask),
+    ev('j1', {
+      kind: 'approval_decided',
+      approvalId: 'a1',
+      decision: 'approved',
+      by: 'remembered',
+    }),
+  ]).jobs;
+  if (!state) throw new Error('no job');
+  expect(agentSaid(state, 'a1')).toBe('Tests pass, publishing.');
+  const decided = state.timeline.at(-1);
+  expect(decided && timelineLine(decided, state.requested)).toBe(
+    'auto-approved (you allowed this for the job): git push',
+  );
 });

@@ -1,4 +1,8 @@
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
+
+// Rules whose approval may be remembered for the rest of a job. Never the ones that can lose
+// data or money: one remembered delete would silently allow any later delete in that job.
+export const REMEMBERABLE_RULES = ['git-push', 'web-code'];
 
 type Msg<T extends string, P = object> = { v: typeof PROTOCOL_VERSION; type: T } & P;
 
@@ -79,12 +83,13 @@ export type ClientMessage =
   | Msg<'retry', { jobId: string }>
   | Msg<'dismiss', { jobId: string }>
   | Msg<'open_folder', { jobId: string }>
+  | Msg<'open_path', { jobId: string; path: string }>
   | Msg<'login'>;
 
 export type AuthState = 'checking' | 'logged_in' | 'logged_out' | 'login_started' | 'api_key';
 
 export type ServerMessage =
-  | Msg<'hello', { daemonVersion: string; startedAt: number }>
+  | Msg<'hello', { daemonVersion: string; startedAt: number; home: string }>
   | Msg<'pong', { id: string; t: number }>
   | Msg<'event', { event: MaiEvent }>
   // Streaming front-desk text; not persisted, the final text arrives as a desk_reply event.

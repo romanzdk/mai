@@ -11,6 +11,7 @@ import {
   type JobSpec,
   type JobStatus,
   PROTOCOL_VERSION,
+  REMEMBERABLE_RULES,
   type ServerMessage,
 } from '@mai/protocol';
 import type { Store } from './store';
@@ -31,6 +32,7 @@ interface RunState {
 
 interface PendingApproval {
   jobId: string;
+  ruleId: string;
   rememberKey: string;
   command: string;
   resolve: (answer: 'approved' | 'denied') => void;
@@ -41,6 +43,11 @@ const LOGIN_POLL_MS = 3000;
 const WORKTREE_SWEEP_MS = 10 * 60_000;
 const LOGIN_TIMEOUT_MS = 10 * 60_000;
 
+const openWithSystem = (target: string) =>
+  spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [target], {
+    stdio: 'ignore',
+    detached: true,
+  }).unref();
 const isDir = (path: string) => statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
 const run = promisify(execFile);
 
@@ -60,7 +67,7 @@ export class Core {
   private listeners = new Set<(msg: ServerMessage) => void>();
   private running = new Map<string, RunState>();
   private pending = new Map<string, PendingApproval>();
-  // "Remember" lasts until the daemon restarts: same rule, same job folder.
+  // "Remember" lasts until the daemon restarts: same rule, same job, remembered rules only.
   private remembered = new Set<string>();
   private auth: { state: AuthState; detail?: string } = { state: 'checking' };
   private loginTimer?: ReturnType<typeof setInterval>;
@@ -93,6 +100,10 @@ export class Core {
 
   get store(): Store {
     return this.opts.store;
+  }
+
+  get home(): string {
+    return this.opts.home;
   }
 
   get authState() {
@@ -209,11 +220,17 @@ export class Core {
 
   private requestApproval(job: Job, req: ApprovalRequest): Promise<'approved' | 'denied'> {
     const approvalId = shortId();
-    const rememberKey = `${req.ruleId}|${job.cwd}`;
+    const rememberKey = `${req.ruleId}|${job.id}`;
     this.opts.store.insertApproval({ id: approvalId, jobId: job.id, ...req });
     this.record(job.id, { kind: 'approval_requested', approvalId, ...req });
     const answer = new Promise<'approved' | 'denied'>((resolve) =>
-      this.pending.set(approvalId, { jobId: job.id, rememberKey, command: req.command, resolve }),
+      this.pending.set(approvalId, {
+        jobId: job.id,
+        ruleId: req.ruleId,
+        rememberKey,
+        command: req.command,
+        resolve,
+      }),
     );
     if (this.remembered.has(rememberKey)) this.decide(approvalId, 'approved', 'remembered');
     else this.setStatus(job.id, 'waiting_approval');
@@ -229,16 +246,18 @@ export class Core {
     const p = this.pending.get(approvalId);
     if (!p) return false;
     this.pending.delete(approvalId);
+    // The UI only offers "remember" for these rules; enforce it here too.
+    const remembers = remember && REMEMBERABLE_RULES.includes(p.ruleId);
     this.opts.store.decideApproval(approvalId, decision);
     this.record(p.jobId, {
       kind: 'approval_decided',
       approvalId,
       decision,
       by,
-      ...(remember ? { remember } : {}),
+      ...(remembers ? { remember: true } : {}),
     });
     const state = this.running.get(p.jobId);
-    if (decision === 'approved' && remember) this.remembered.add(p.rememberKey);
+    if (decision === 'approved' && remembers) this.remembered.add(p.rememberKey);
     if (decision === 'denied' && by === 'you' && state) state.denied = p.command;
     const stillWaiting = [...this.pending.values()].some((x) => x.jobId === p.jobId);
     if (decision === 'approved' && by === 'you' && !stillWaiting && !state?.cancelled) {
@@ -316,9 +335,19 @@ export class Core {
 
   openFolder(jobId: string): void {
     const job = this.opts.store.job(jobId);
-    if (!job || !isDir(job.cwd)) return;
-    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
-    spawn(opener, [job.cwd], { stdio: 'ignore', detached: true }).unref();
+    if (job && isDir(job.cwd)) openWithSystem(job.cwd);
+  }
+
+  // Only what the job's own report lists as an artifact, so the UI cannot be used to open
+  // arbitrary files or URLs.
+  openPath(jobId: string, path: string): boolean {
+    const artifacts = this.opts.store.report(jobId)?.artifacts ?? [];
+    if (!artifacts.includes(path)) return false;
+    if (/^https?:\/\//.test(path) || statSync(path, { throwIfNoEntry: false })) {
+      openWithSystem(path);
+      return true;
+    }
+    return false;
   }
 
   private setAuth(state: AuthState, detail?: string): void {

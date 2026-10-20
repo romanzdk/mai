@@ -17,20 +17,8 @@ interface DaemonInfo {
 }
 
 export type Connection =
-  | { status: 'starting' | 'connecting' | 'disconnected' | 'exited' }
-  | { status: 'connected'; version: string; startedAt: number; rtt?: number };
-
-export interface Daemon {
-  connection: Connection;
-  events: MaiEvent[];
-  // Live front-desk text by inputId, until its desk_reply event lands.
-  deltas: Record<string, string>;
-  // Inputs sent but not yet echoed back as user_input events.
-  pending: { inputId: string; text: string }[];
-  auth: { state: AuthState; detail?: string };
-  send: (text: string, aboutJobId?: string) => void;
-  act: (msg: Action) => void;
-}
+  | { status: 'starting' | 'connecting' | 'disconnected' | 'exited'; since: number }
+  | { status: 'connected'; since: number; version: string; startedAt: number; rtt?: number };
 
 // Client messages other than the connection plumbing, without the version field.
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -39,40 +27,56 @@ export type Action = DistributiveOmit<
   'v'
 >;
 
+export interface Daemon {
+  connection: Connection;
+  home: string;
+  events: MaiEvent[];
+  // Live front-desk text by inputId, until its desk_reply event lands.
+  deltas: Record<string, string>;
+  // Inputs not yet echoed back as user_input events; `queued` ones wait for a connection.
+  pending: {
+    inputId: string;
+    text: string;
+    aboutJobId?: string;
+    sentAt: number;
+    queued: boolean;
+  }[];
+  auth: { state: AuthState; detail?: string };
+  // Requests queue until connected, so nothing typed or dictated is lost. Actions do not:
+  // a late approve could act on stale state, so act returns false when it sent nothing.
+  send: (text: string, aboutJobId?: string) => void;
+  act: (msg: Action) => boolean;
+  restart: () => void;
+}
+
 const PING_MS = 2000;
 const RECONNECT_MS = 1000;
 
-async function daemonInfo(): Promise<DaemonInfo> {
-  if (!isTauri()) {
-    return { url: import.meta.env.VITE_MAI_DAEMON_URL, token: import.meta.env.VITE_MAI_TOKEN };
-  }
-  // Subscribe before asking, so a ready event between the two calls is not lost.
-  let resolveReady: (info: DaemonInfo) => void = () => {};
-  const ready = new Promise<DaemonInfo>((r) => {
-    resolveReady = r;
-  });
-  const unlisten = await listen<DaemonInfo>('daemon-ready', (e) => resolveReady(e.payload));
-  const info = await invoke<DaemonInfo | null>('daemon_info');
-  if (info) resolveReady(info);
-  return ready.finally(unlisten);
-}
+export const setAttention = (count: number) => {
+  if (isTauri()) void invoke('set_attention', { count }).catch(() => {});
+};
 
 export function useDaemon(): Daemon {
-  const [connection, setConnection] = useState<Connection>({ status: 'starting' });
+  const [connection, setConnection] = useState<Connection>({
+    status: 'starting',
+    since: Date.now(),
+  });
+  const [home, setHome] = useState('');
   const [events, setEvents] = useState<MaiEvent[]>([]);
   const [deltas, setDeltas] = useState<Record<string, string>>({});
-  const [pending, setPending] = useState<{ inputId: string; text: string }[]>([]);
+  const [pending, setPending] = useState<Daemon['pending']>([]);
   const [auth, setAuth] = useState<{ state: AuthState; detail?: string }>({ state: 'checking' });
   const wsRef = useRef<WebSocket | null>(null);
   const lastId = useRef(0);
+  const outbox = useRef<ClientMessage[]>([]);
 
   useEffect(() => {
     let pingTimer: ReturnType<typeof setInterval> | undefined;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
-    const unlistenExit = isTauri()
-      ? listen('daemon-exit', () => setConnection({ status: 'exited' }))
-      : Promise.resolve(() => {});
+    let info: DaemonInfo | undefined;
+    const status = (s: Exclude<Connection['status'], 'connected'>) =>
+      setConnection((c) => (c.status === s ? c : { status: s, since: Date.now() }));
 
     const onEvent = (event: MaiEvent) => {
       if (event.id <= lastId.current) return;
@@ -85,17 +89,20 @@ export function useDaemon(): Daemon {
       }
     };
 
-    const connect = (info: DaemonInfo) => {
-      if (stopped) return;
-      setConnection({ status: 'connecting' });
+    const connect = () => {
+      if (stopped || !info) return;
+      clearTimeout(retryTimer);
+      status('connecting');
       const ws = new WebSocket(`${info.url}/?token=${encodeURIComponent(info.token)}`);
       wsRef.current = ws;
       const send = (msg: ClientMessage) => ws.send(encode(msg));
       ws.onmessage = (e) => {
         const msg = decode<ServerMessage>(e.data);
         if (msg?.type === 'hello') {
+          setHome(msg.home);
           setConnection({
             status: 'connected',
+            since: Date.now(),
             version: msg.daemonVersion,
             startedAt: msg.startedAt,
           });
@@ -111,6 +118,9 @@ export function useDaemon(): Daemon {
       };
       ws.onopen = () => {
         send({ v: PROTOCOL_VERSION, type: 'subscribe', since: lastId.current });
+        const queued = outbox.current.splice(0);
+        for (const msg of queued) send(msg);
+        if (queued.length) setPending((p) => p.map((x) => ({ ...x, queued: false })));
         pingTimer = setInterval(
           () => send({ v: PROTOCOL_VERSION, type: 'ping', id: crypto.randomUUID(), t: Date.now() }),
           PING_MS,
@@ -118,45 +128,79 @@ export function useDaemon(): Daemon {
       };
       ws.onclose = () => {
         clearInterval(pingTimer);
-        wsRef.current = null;
-        if (stopped) return;
-        setConnection((s) => (s.status === 'exited' ? s : { status: 'disconnected' }));
-        retryTimer = setTimeout(() => connect(info), RECONNECT_MS);
+        if (wsRef.current === ws) wsRef.current = null;
+        if (stopped || wsRef.current) return;
+        setConnection((s) =>
+          s.status === 'exited' ? s : { status: 'disconnected', since: Date.now() },
+        );
+        retryTimer = setTimeout(connect, RECONNECT_MS);
       };
     };
 
-    daemonInfo().then(connect);
+    // A restarted daemon listens on a new port with a new token, so every ready event
+    // replaces the connection.
+    const use = (next: DaemonInfo) => {
+      if (info?.url === next.url && info.token === next.token) return;
+      info = next;
+      const old = wsRef.current;
+      wsRef.current = null;
+      old?.close();
+      connect();
+    };
+
+    const unlisten: Promise<() => void>[] = [];
+    if (isTauri()) {
+      unlisten.push(listen<DaemonInfo>('daemon-ready', (e) => use(e.payload)));
+      unlisten.push(
+        listen('daemon-exit', () => {
+          clearTimeout(retryTimer);
+          setConnection({ status: 'exited', since: Date.now() });
+        }),
+      );
+      void invoke<DaemonInfo | null>('daemon_info').then((i) => i && use(i));
+    } else {
+      use({ url: import.meta.env.VITE_MAI_DAEMON_URL, token: import.meta.env.VITE_MAI_TOKEN });
+    }
 
     return () => {
       stopped = true;
       clearInterval(pingTimer);
       clearTimeout(retryTimer);
       wsRef.current?.close();
-      unlistenExit.then((f) => f());
+      for (const u of unlisten) void u.then((f) => f());
     };
-  }, []);
-
-  const send = useCallback((text: string, aboutJobId?: string) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const inputId = crypto.randomUUID();
-    setPending((p) => [...p, { inputId, text }]);
-    ws.send(
-      encode({
-        v: PROTOCOL_VERSION,
-        type: 'input',
-        inputId,
-        text,
-        ...(aboutJobId ? { aboutJobId } : {}),
-      }),
-    );
   }, []);
 
   const act = useCallback((msg: Action) => {
     const ws = wsRef.current;
-    if (ws?.readyState === WebSocket.OPEN)
-      ws.send(encode({ v: PROTOCOL_VERSION, ...msg } as ClientMessage));
+    if (ws?.readyState !== WebSocket.OPEN) return false;
+    ws.send(encode({ v: PROTOCOL_VERSION, ...msg } as ClientMessage));
+    return true;
   }, []);
 
-  return { connection, events, deltas, pending, auth, send, act };
+  const send = useCallback((text: string, aboutJobId?: string) => {
+    const inputId = crypto.randomUUID();
+    const msg: ClientMessage = {
+      v: PROTOCOL_VERSION,
+      type: 'input',
+      inputId,
+      text,
+      ...(aboutJobId ? { aboutJobId } : {}),
+    };
+    const ws = wsRef.current;
+    const open = ws?.readyState === WebSocket.OPEN;
+    if (open) ws.send(encode(msg));
+    else outbox.current.push(msg);
+    setPending((p) => [
+      ...p,
+      { inputId, text, sentAt: Date.now(), queued: !open, ...(aboutJobId ? { aboutJobId } : {}) },
+    ]);
+  }, []);
+
+  const restart = useCallback(() => {
+    setConnection({ status: 'starting', since: Date.now() });
+    if (isTauri()) void invoke('restart_daemon').catch(() => {});
+  }, []);
+
+  return { connection, home, events, deltas, pending, auth, send, act, restart };
 }

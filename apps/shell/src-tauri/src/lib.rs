@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, UserAttentionType};
 use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -13,6 +13,7 @@ use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 // Must match the line printed by apps/daemon/src/main.ts.
 const READY_PREFIX: &str = "MAI_DAEMON_READY ";
 const TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+Space";
+const TRAY_ID: &str = "main";
 
 #[derive(Clone, Serialize)]
 struct DaemonInfo {
@@ -24,6 +25,8 @@ struct DaemonInfo {
 struct Daemon {
     info: Mutex<Option<DaemonInfo>>,
     child: Mutex<Option<CommandChild>>,
+    // Approvals and other items waiting for the user, as last reported by the UI.
+    waiting: Mutex<u32>,
 }
 
 #[derive(Deserialize)]
@@ -45,6 +48,43 @@ fn random_token() -> std::io::Result<String> {
 #[tauri::command]
 fn daemon_info(daemon: State<Daemon>) -> Option<DaemonInfo> {
     daemon.info.lock().unwrap().clone()
+}
+
+// Bounce the dock / flash the taskbar only when something new arrives while the user is
+// not looking at mai.
+fn should_request_attention(previous: u32, count: u32, visible: bool, focused: bool) -> bool {
+    count > previous && !(visible && focused)
+}
+
+#[tauri::command]
+fn set_attention(app: AppHandle, daemon: State<Daemon>, count: u32) {
+    let previous = std::mem::replace(&mut *daemon.waiting.lock().unwrap(), count);
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_title((count > 0).then(|| count.to_string()));
+        let tooltip = match count {
+            0 => "mai".to_string(),
+            n => format!("mai: {n} waiting for you"),
+        };
+        let _ = tray.set_tooltip(Some(tooltip));
+    }
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let visible = window.is_visible().unwrap_or(false);
+    let focused = window.is_focused().unwrap_or(false);
+    if should_request_attention(previous, count, visible, focused) {
+        let _ = window.request_user_attention(Some(UserAttentionType::Critical));
+    } else if count == 0 {
+        let _ = window.request_user_attention(None);
+    }
+}
+
+#[tauri::command]
+fn restart_daemon(app: AppHandle, daemon: State<Daemon>) -> Result<(), String> {
+    if daemon.info.lock().unwrap().is_some() {
+        return Ok(());
+    }
+    spawn_daemon(&app).map_err(|e| e.to_string())
 }
 
 fn daemon_script(app: &AppHandle) -> tauri::Result<PathBuf> {
@@ -96,6 +136,7 @@ fn spawn_daemon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 CommandEvent::Terminated(status) => {
                     eprintln!("[daemon] exited with {:?}", status.code);
                     *app.state::<Daemon>().info.lock().unwrap() = None;
+                    app.state::<Daemon>().child.lock().unwrap().take();
                     let _ = app.emit("daemon-exit", status.code);
                 }
                 _ => {}
@@ -132,12 +173,17 @@ pub fn run() {
                 .build(),
         )
         .manage(Daemon::default())
-        .invoke_handler(tauri::generate_handler![daemon_info])
+        .invoke_handler(tauri::generate_handler![
+            daemon_info,
+            set_attention,
+            restart_daemon
+        ])
         .setup(|app| {
             spawn_daemon(app.handle())?;
             let toggle = MenuItem::with_id(app, "toggle", "Show / hide", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit mai", true, None::<&str>)?;
-            TrayIconBuilder::new()
+            TrayIconBuilder::with_id(TRAY_ID)
+                .tooltip("mai")
                 .icon(app.default_window_icon().cloned().expect("bundle icon"))
                 .menu(&Menu::with_items(app, &[&toggle, &quit])?)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -162,6 +208,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn asks_for_attention_only_for_new_items_while_away() {
+        assert!(should_request_attention(0, 1, false, false));
+        assert!(should_request_attention(1, 2, true, false));
+        assert!(!should_request_attention(0, 1, true, true));
+        assert!(!should_request_attention(2, 1, false, false));
+        assert!(!should_request_attention(1, 1, false, false));
+    }
 
     #[test]
     fn parses_ready_line() {

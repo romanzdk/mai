@@ -1,552 +1,349 @@
-import type { AuthState } from '@mai/protocol';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { type Action, type Connection, useDaemon } from './daemon';
+import type { MaiEvent } from '@mai/protocol';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { setAttention, useDaemon } from './daemon';
+import { derive, isActive, type JobState } from './derive';
+import { ApprovalCard, JobRow, JobView } from './job';
 import {
-  ACTIVE,
-  type ApprovalEvent,
-  derive,
-  type Exchange,
-  type JobState,
-  searchJobs,
-  timelineLine,
-} from './derive';
+  Conversation,
+  EmptyState,
+  HistoryView,
+  InboxView,
+  InputBar,
+  Notices,
+  TopBar,
+} from './panels';
+import { isMod, SHORTCUT_KEYS, useNow } from './ui';
 
-type Act = (msg: Action) => void;
 type View =
   | { name: 'home' }
   | { name: 'inbox' }
   | { name: 'history' }
   | { name: 'job'; id: string };
 
-const useNow = (ms: number) => {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
-  return now;
-};
+const HOME: View = { name: 'home' };
+const sameView = (a: View, b: View) =>
+  a.name === b.name && (a.name !== 'job' || (b.name === 'job' && a.id === b.id));
 
-const statusLabel = (s: string) => s.replace('_', ' ');
-
-function StatusLine({
-  connection,
-  inboxCount,
-  onInbox,
-  onHistory,
-}: {
-  connection: Connection;
-  inboxCount: number;
-  onInbox: () => void;
-  onHistory: () => void;
-}) {
-  const now = useNow(1000);
-  return (
-    <div className="status" data-testid="daemon-status">
-      <span>
-        <span className="dot" data-state={connection.status}>
-          ●
-        </span>{' '}
-        daemon {connection.status}
-      </span>
-      {connection.status === 'connected' && (
-        <>
-          <span>v{connection.version}</span>
-          <span>up {Math.round((now - connection.startedAt) / 1000)}s</span>
-          {connection.rtt !== undefined && <span>rtt {connection.rtt} ms</span>}
-        </>
-      )}
-      <button type="button" className="link history-link" onClick={onHistory}>
-        history
-      </button>
-      <button
-        type="button"
-        className="link inbox-link"
-        data-attention={inboxCount > 0}
-        onClick={onInbox}
-      >
-        inbox {inboxCount}
-      </button>
-    </div>
-  );
-}
-
-function LoginBanner({ auth, act }: { auth: { state: AuthState; detail?: string }; act: Act }) {
-  if (auth.state !== 'logged_out' && auth.state !== 'login_started') return null;
-  return (
-    <div className="banner" data-testid="login">
-      {auth.state === 'logged_out' ? (
-        <>
-          <span>Not signed in to Claude{auth.detail ? ` (${auth.detail})` : ''}.</span>
-          <button type="button" className="button primary" onClick={() => act({ type: 'login' })}>
-            Sign in
-          </button>
-        </>
-      ) : (
-        <span>Finish signing in in the Terminal window. This updates by itself.</span>
-      )}
-    </div>
-  );
-}
-
-function JobRow({ state, onOpen }: { state: JobState; onOpen: () => void }) {
-  const last = state.timeline.at(-1);
-  const line = state.report?.summary ?? (last ? timelineLine(last) : state.status);
-  return (
-    <button type="button" className="job" data-status={state.status} onClick={onOpen}>
-      <span className="job-status">{statusLabel(state.status)}</span>
-      <span className="job-title">{state.job.title}</span>
-      <span className="job-line">{line}</span>
-    </button>
-  );
-}
-
-function ApprovalCard({
-  approval,
-  job,
-  act,
-  onOpenJob,
-}: {
-  approval: ApprovalEvent;
-  job: JobState;
-  act: Act;
-  onOpenJob?: () => void;
-}) {
-  const [remember, setRemember] = useState(false);
-  return (
-    <div className="approval" data-testid="approval">
-      <div className="approval-head">
-        <span className="label">needs approval · {approval.reason}</span>
-        {onOpenJob ? (
-          <button type="button" className="link" onClick={onOpenJob}>
-            {job.job.title}
-          </button>
-        ) : null}
-      </div>
-      <pre className="command">{approval.command}</pre>
-      <div className="actions">
-        <button
-          type="button"
-          className="button primary"
-          onClick={() => act({ type: 'approve', approvalId: approval.approvalId, remember })}
-        >
-          Approve
-        </button>
-        <button
-          type="button"
-          className="button danger"
-          onClick={() => act({ type: 'deny', approvalId: approval.approvalId })}
-        >
-          Deny
-        </button>
-        <label className="muted">
-          <input
-            type="checkbox"
-            checked={remember}
-            onChange={(e) => setRemember(e.target.checked)}
-          />{' '}
-          allow this kind of action in this job folder until mai restarts
-        </label>
-      </div>
-    </div>
-  );
-}
-
-function ReportCard({ state }: { state: JobState }) {
-  const r = state.report;
-  if (!r) return null;
-  const list = (label: string, items: string[]) =>
-    items.length > 0 && (
-      <div className="report-list">
-        <span className="label">{label}</span>
-        <ul>
-          {items.map((x) => (
-            <li key={x}>{x}</li>
-          ))}
-        </ul>
-      </div>
-    );
-  return (
-    <div className="report" data-testid="report">
-      <p>{r.summary}</p>
-      {list('needs you', r.needs_you)}
-      {list('changes', r.changes)}
-      {list('artifacts', r.artifacts)}
-    </div>
-  );
-}
-
-function JobView({
-  state,
-  act,
-  onBack,
-  onOpenJob,
-  onFollowUp,
-}: {
-  state: JobState;
-  act: Act;
-  onBack: () => void;
-  onOpenJob: (id: string) => void;
-  onFollowUp: () => void;
-}) {
-  const id = state.job.id;
-  const active = ACTIVE.includes(state.status);
-  return (
-    <div className="job-view">
-      <div className="job-view-head">
-        <button type="button" className="link" onClick={onBack}>
-          ← back (esc)
-        </button>
-        <h2>{state.job.title}</h2>
-        <span className="job-status" data-status={state.status}>
-          {statusLabel(state.status)}
-        </span>
-        <span className="muted mono">{state.job.cwd}</span>
-        {state.job.branch && <span className="mono">branch {state.job.branch}</span>}
-        {state.retryOf && (
-          <button type="button" className="link" onClick={() => onOpenJob(state.retryOf as string)}>
-            retry of {state.retryOf}
-          </button>
-        )}
-      </div>
-      <div className="actions">
-        {active ? (
-          <button
-            type="button"
-            className="button danger"
-            onClick={() => act({ type: 'cancel', jobId: id })}
-          >
-            Cancel
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="button"
-            onClick={() => act({ type: 'retry', jobId: id })}
-          >
-            Retry
-          </button>
-        )}
-        <button
-          type="button"
-          className="button"
-          onClick={() => act({ type: 'open_folder', jobId: id })}
-        >
-          Open folder
-        </button>
-        <button type="button" className="button" onClick={onFollowUp}>
-          Ask follow-up
-        </button>
-        {!active && !state.dismissed && (
-          <button
-            type="button"
-            className="button"
-            title={state.job.branch ? 'Also removes the job worktree; the branch stays' : undefined}
-            onClick={() => act({ type: 'dismiss', jobId: id })}
-          >
-            Dismiss
-          </button>
-        )}
-      </div>
-      {state.pendingApprovals.map((a) => (
-        <ApprovalCard key={a.approvalId} approval={a} job={state} act={act} />
-      ))}
-      <ReportCard state={state} />
-      {state.error && <p className="error">{state.error}</p>}
-      <ol className="timeline">
-        {state.timeline
-          .filter((e) => e.kind !== 'job_report')
-          .map((e) => (
-            <li key={e.id} data-kind={e.kind}>
-              <span className="muted">{new Date(e.ts).toLocaleTimeString()}</span>
-              <span>{e.kind === 'job_text' ? e.text : timelineLine(e)}</span>
-            </li>
-          ))}
-      </ol>
-    </div>
-  );
-}
-
-function InboxView({
-  approvals,
-  needsYou,
-  act,
-  onBack,
-  onOpenJob,
-}: {
-  approvals: { approval: ApprovalEvent; job: JobState }[];
-  needsYou: JobState[];
-  act: Act;
-  onBack: () => void;
-  onOpenJob: (id: string) => void;
-}) {
-  return (
-    <div className="job-view" data-testid="inbox">
-      <div className="job-view-head">
-        <button type="button" className="link" onClick={onBack}>
-          ← back (esc)
-        </button>
-        <h2>Inbox</h2>
-      </div>
-      {approvals.length === 0 && needsYou.length === 0 && (
-        <p className="muted">Nothing is waiting for you.</p>
-      )}
-      {approvals.map(({ approval, job }) => (
-        <ApprovalCard
-          key={approval.approvalId}
-          approval={approval}
-          job={job}
-          act={act}
-          onOpenJob={() => onOpenJob(job.job.id)}
-        />
-      ))}
-      {needsYou.map((j) => (
-        <div key={j.job.id} className="needs-you">
-          <div className="approval-head">
-            <span className="label">needs you · {statusLabel(j.status)}</span>
-            <button type="button" className="link" onClick={() => onOpenJob(j.job.id)}>
-              {j.job.title}
-            </button>
-          </div>
-          <ul>
-            {j.report?.needs_you.map((x) => (
-              <li key={x}>{x}</li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            className="button"
-            onClick={() => act({ type: 'dismiss', jobId: j.job.id })}
-          >
-            Dismiss
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function HistoryView({
-  jobs,
-  onBack,
-  onOpenJob,
-}: {
-  jobs: JobState[];
-  onBack: () => void;
-  onOpenJob: (id: string) => void;
-}) {
-  const [query, setQuery] = useState('');
-  const found = searchJobs(jobs, query);
-  return (
-    <div className="job-view" data-testid="history">
-      <div className="job-view-head">
-        <button type="button" className="link" onClick={onBack}>
-          ← back (esc)
-        </button>
-        <h2>History</h2>
-        <span className="muted">
-          {found.length} of {jobs.length} jobs
-        </span>
-      </div>
-      <input
-        className="search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search titles, instructions, folders and reports"
-        aria-label="search jobs"
-        // biome-ignore lint/a11y/noAutofocus: the view exists to type a search
-        autoFocus
-      />
-      <section className="board">
-        {found.map((j) => (
-          <JobRow key={j.job.id} state={j} onOpen={() => onOpenJob(j.job.id)} />
-        ))}
-      </section>
-    </div>
-  );
-}
-
-function Conversation({
-  exchanges,
-  deltas,
-  pending,
-  titles,
-}: {
-  exchanges: Exchange[];
-  deltas: Record<string, string>;
-  pending: { inputId: string; text: string }[];
-  titles: Map<string, string>;
-}) {
-  const items = [
-    ...exchanges.slice(-6),
-    ...pending.map((p): Exchange => ({ ...p, ts: 0, jobIds: [] })),
-  ];
-  return (
-    <div className="conversation" data-testid="conversation">
-      {items.map((ex) => (
-        <div key={ex.inputId} className="exchange">
-          <div className="you">
-            {ex.aboutJobId && (
-              <span className="about">about {titles.get(ex.aboutJobId) ?? ex.aboutJobId} · </span>
-            )}
-            {ex.text}
-          </div>
-          <div className="desk">
-            {ex.error ? (
-              <span className="error">{ex.error}</span>
-            ) : (
-              (ex.reply ?? deltas[ex.inputId] ?? <span className="muted">…</span>)
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function InputBar({
-  onSend,
-  disabled,
-  about,
-  onClearAbout,
-}: {
-  onSend: (text: string) => void;
-  disabled: boolean;
-  about?: string;
-  onClearAbout: () => void;
-}) {
-  const [text, setText] = useState('');
-  const ref = useRef<HTMLInputElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refocus when a follow-up starts
-  useEffect(() => ref.current?.focus(), [about]);
-  return (
-    <form
-      className="input-bar"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!text.trim() || disabled) return;
-        onSend(text.trim());
-        setText('');
-      }}
-    >
-      {about && (
-        <div className="about-chip" data-testid="about-chip">
-          follow-up about {about}
-          <button
-            type="button"
-            className="link"
-            onClick={onClearAbout}
-            aria-label="clear follow-up"
-          >
-            ×
-          </button>
-        </div>
-      )}
-      <input
-        ref={ref}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={
-          disabled
-            ? 'waiting for the daemon…'
-            : about
-              ? 'Ask about this job'
-              : 'What do you want done?'
-        }
-        aria-label="request"
-        autoComplete="off"
-        spellCheck={false}
-      />
-    </form>
-  );
+// One sentence for screen readers per event worth hearing; streaming deltas are skipped.
+function announcement(e: MaiEvent, jobs: Map<string, JobState>): string | undefined {
+  const title = e.jobId ? (jobs.get(e.jobId)?.job.title ?? 'a job') : '';
+  switch (e.kind) {
+    case 'desk_reply':
+      return e.text;
+    case 'desk_error':
+      return `Error: ${e.message}`;
+    case 'approval_requested':
+      return `Approval needed for ${title}: ${e.reason}: ${e.command}`;
+    case 'job_status':
+      return ['done', 'failed', 'cancelled'].includes(e.status)
+        ? `${title} ${e.status}${e.error ? `: ${e.error}` : ''}`
+        : undefined;
+    default:
+      return undefined;
+  }
 }
 
 export function App() {
-  const { connection, events, deltas, pending, auth, send, act } = useDaemon();
+  const { connection, home, events, deltas, pending, auth, send, act, restart } = useDaemon();
   const { jobs, exchanges, approvals, needsYou } = useMemo(() => derive(events), [events]);
-  const [view, setView] = useState<View>({ name: 'home' });
-  const [aboutJob, setAboutJob] = useState<string | undefined>();
-  const titles = useMemo(() => new Map(jobs.map((j) => [j.job.id, j.job.title])), [jobs]);
-  const home = () => setView({ name: 'home' });
-  const openJob = (id: string) => setView({ name: 'job', id });
-  const open = view.name === 'job' ? jobs.find((j) => j.job.id === view.id) : undefined;
+  const byId = useMemo(() => new Map(jobs.map((j) => [j.job.id, j])), [jobs]);
+  const now = useNow(1000);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const atBottom = useRef(true);
+  const retrying = useRef<string | null>(null);
+
+  const [stack, setStack] = useState<View[]>([HOME]);
+  const view = stack.at(-1) ?? HOME;
+  const go = useCallback(
+    (v: View) => setStack((s) => (sameView(s.at(-1) ?? HOME, v) ? s : [...s, v])),
+    [],
+  );
+  const back = useCallback(() => setStack((s) => (s.length > 1 ? s.slice(0, -1) : [HOME])), []);
+  const openJob = useCallback((id: string) => go({ name: 'job', id }), [go]);
+  const open = view.name === 'job' ? byId.get(view.id) : undefined;
+  const inboxCount = approvals.length + needsYou.length;
+
+  // The input is where focus rests: dictation types into whatever is focused, so text
+  // spoken after a click or Esc must not land on <body>.
+  useEffect(() => {
+    if (!document.activeElement || document.activeElement === document.body) {
+      inputRef.current?.focus();
+    }
+  });
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setView({ name: 'home' });
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA';
+      if (e.key === 'Escape') {
+        back();
+        inputRef.current?.focus();
+        return;
+      }
+      if (isMod(e)) {
+        const key = e.key.toLowerCase();
+        // The webview reloads on Cmd/Ctrl+R; never let that happen.
+        if (key === 'r') e.preventDefault();
+        const name = SHORTCUT_KEYS[key] ?? (/^[1-9]$/.test(key) ? `row-${key}` : undefined);
+        const el = name
+          ? document.querySelector<HTMLButtonElement>(`[data-shortcut="${name}"]:not(:disabled)`)
+          : null;
+        if (el) {
+          e.preventDefault();
+          el.click();
+        }
+        return;
+      }
+      if (e.key === 'PageUp' || e.key === 'PageDown') {
+        const main = mainRef.current;
+        if (main) {
+          e.preventDefault();
+          main.scrollBy({ top: (e.key === 'PageUp' ? -0.8 : 0.8) * main.clientHeight });
+        }
+        return;
+      }
+      if (!typing && !e.altKey && e.key.length === 1) inputRef.current?.focus();
+    };
+    // After a mouse click on a button, hand focus back to the input. Keyboard clicks
+    // (detail 0) keep focus where it is, so Tab navigation still works.
+    const onClick = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.detail > 0 && el?.closest('button')) {
+        requestAnimationFrame(() => {
+          const active = document.activeElement;
+          if (!active || active === document.body || active.tagName === 'BUTTON') {
+            inputRef.current?.focus();
+          }
+        });
+      }
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('click', onClick);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('click', onClick);
+    };
+  }, [back]);
+
+  // Retry opens the new job as soon as it exists.
+  useEffect(() => {
+    if (!retrying.current) return;
+    const next = jobs.find((j) => j.retryOf === retrying.current);
+    if (next) {
+      retrying.current = null;
+      setStack((s) => [...s.slice(0, -1), { name: 'job', id: next.job.id }]);
+    }
+  }, [jobs]);
+  const retry = (id: string) => {
+    if (act({ type: 'retry', jobId: id })) retrying.current = id;
+  };
+
+  // Leave an inbox the user just emptied.
+  const lastInboxCount = useRef(inboxCount);
+  useEffect(() => {
+    if (view.name === 'inbox' && inboxCount === 0 && lastInboxCount.current > 0) back();
+    lastInboxCount.current = inboxCount;
+  }, [inboxCount, view.name, back]);
+
+  // Pinned to the bottom like a terminal: new content keeps the newest line in sight unless
+  // the user has scrolled up to read.
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    atBottom.current = view.name === 'home';
+    main.scrollTop = atBottom.current ? main.scrollHeight : 0;
+  }, [view]);
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    if (main && atBottom.current) main.scrollTop = main.scrollHeight;
+  });
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const pin = new ResizeObserver(() => {
+      if (atBottom.current) main.scrollTop = main.scrollHeight;
+    });
+    pin.observe(main);
+    return () => pin.disconnect();
   }, []);
 
-  const active = jobs.filter((j) => ACTIVE.includes(j.status));
-  const finished = jobs.filter((j) => !ACTIVE.includes(j.status)).slice(0, 8);
+  const [announce, setAnnounce] = useState('');
+  const announced = useRef(0);
+  useEffect(() => {
+    const fresh = events.filter((e) => e.id > announced.current);
+    if (fresh.length === 0) return;
+    announced.current = fresh.at(-1)?.id ?? announced.current;
+    // Replayed history on connect is not news.
+    if (fresh.length > 20) return;
+    const text = fresh
+      .map((e) => announcement(e, byId))
+      .filter(Boolean)
+      .at(-1);
+    if (text) setAnnounce(text);
+  }, [events, byId]);
+
+  useEffect(() => {
+    document.title = inboxCount ? `(${inboxCount}) mai` : 'mai';
+    setAttention(inboxCount);
+  }, [inboxCount]);
+
+  const active = jobs.filter(isActive).reverse();
+  const finished = jobs
+    .filter((j) => !isActive(j))
+    .slice(0, 8)
+    .reverse();
+  // Number rows from the bottom up, nearest the input first, the way the eye reads them.
+  const rowIndex = new Map(
+    [...active]
+      .reverse()
+      .concat([...finished].reverse())
+      .map((j, i) => [j.job.id, i]),
+  );
+  const homeTargetApproval = active.flatMap((j) => j.pendingApprovals)[0]?.approvalId;
+  const homeExchanges = exchanges.filter((e) => !e.aboutJobId).slice(-4);
+  const homePending = pending.filter((p) => !p.aboutJobId);
+  const history = exchanges.map((e) => e.text).reverse();
+  const signedOut = auth.state === 'logged_out' || auth.state === 'login_started';
 
   return (
     <div className="app">
-      <StatusLine
+      <TopBar
         connection={connection}
-        inboxCount={approvals.length + needsYou.length}
-        onInbox={() => setView({ name: 'inbox' })}
-        onHistory={() => setView({ name: 'history' })}
+        inboxCount={inboxCount}
+        onInbox={() => go({ name: 'inbox' })}
+        onHistory={() => go({ name: 'history' })}
       />
-      <main className="main">
+      <main
+        ref={mainRef}
+        className="main"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        }}
+      >
         {view.name === 'inbox' ? (
           <InboxView
             approvals={approvals}
             needsYou={needsYou}
             act={act}
-            onBack={home}
+            home={home}
+            now={now}
+            onBack={back}
             onOpenJob={openJob}
+            onRetry={retry}
           />
         ) : view.name === 'history' ? (
-          <HistoryView jobs={jobs} onBack={home} onOpenJob={openJob} />
+          <HistoryView jobs={jobs} now={now} onBack={back} onOpenJob={openJob} />
         ) : open ? (
           <JobView
             state={open}
             act={act}
-            onBack={home}
+            now={now}
+            home={home}
+            onBack={back}
             onOpenJob={openJob}
-            onFollowUp={() => {
-              setAboutJob(open.job.id);
-              home();
+            onRetry={() => retry(open.job.id)}
+            onDismiss={() => {
+              if (act({ type: 'dismiss', jobId: open.job.id })) back();
             }}
-          />
+          >
+            <Conversation
+              exchanges={exchanges.filter((e) => e.aboutJobId === open.job.id)}
+              deltas={deltas}
+              pending={pending.filter((p) => p.aboutJobId === open.job.id)}
+              jobs={byId}
+              now={now}
+              onOpenJob={openJob}
+            />
+          </JobView>
         ) : (
-          <>
-            {approvals.map(({ approval, job }) => (
-              <ApprovalCard
-                key={approval.approvalId}
-                approval={approval}
-                job={job}
-                act={act}
-                onOpenJob={() => openJob(job.job.id)}
-              />
-            ))}
-            <section className="board" data-testid="board">
-              {active.length === 0 && finished.length === 0 && (
-                <p className="muted">No jobs yet.</p>
-              )}
-              {active.map((j) => (
-                <JobRow key={j.job.id} state={j} onOpen={() => openJob(j.job.id)} />
-              ))}
-              {finished.length > 0 && <h3 className="label">recent</h3>}
-              {finished.map((j) => (
-                <JobRow key={j.job.id} state={j} onOpen={() => openJob(j.job.id)} />
-              ))}
+          <div className="home">
+            <h1 className="sr-only">Home</h1>
+            {jobs.length === 0 && <EmptyState />}
+            <section className="board" data-testid="board" aria-label="jobs">
+              {finished.length > 0 && <h2 className="label">recent</h2>}
+              <ul>
+                {finished.map((j) => (
+                  <li key={j.job.id}>
+                    <JobRow
+                      state={j}
+                      now={now}
+                      index={rowIndex.get(j.job.id)}
+                      onOpen={() => openJob(j.job.id)}
+                    />
+                  </li>
+                ))}
+              </ul>
+              <ul>
+                {active.map((j) => (
+                  <li key={j.job.id}>
+                    {j.pendingApprovals.length > 0 ? (
+                      j.pendingApprovals.map((a) => (
+                        <ApprovalCard
+                          key={a.approvalId}
+                          approval={a}
+                          job={j}
+                          act={act}
+                          home={home}
+                          now={now}
+                          isTarget={a.approvalId === homeTargetApproval}
+                          onOpenJob={() => openJob(j.job.id)}
+                        />
+                      ))
+                    ) : (
+                      <JobRow
+                        state={j}
+                        now={now}
+                        index={rowIndex.get(j.job.id)}
+                        onOpen={() => openJob(j.job.id)}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
             </section>
-            <Conversation exchanges={exchanges} deltas={deltas} pending={pending} titles={titles} />
-          </>
+            <Conversation
+              exchanges={homeExchanges}
+              deltas={deltas}
+              pending={homePending}
+              jobs={byId}
+              now={now}
+              onOpenJob={openJob}
+            />
+          </div>
         )}
       </main>
-      <LoginBanner auth={auth} act={act} />
-      <InputBar
-        onSend={(text) => {
-          send(text, aboutJob);
-          setAboutJob(undefined);
-        }}
-        disabled={connection.status !== 'connected'}
-        {...(aboutJob ? { about: titles.get(aboutJob) ?? aboutJob } : {})}
-        onClearAbout={() => setAboutJob(undefined)}
+      <Notices
+        connection={connection}
+        now={now}
+        auth={auth}
+        act={act}
+        restart={restart}
+        approvals={approvals}
+        showApprovalStrip={
+          view.name !== 'home' && view.name !== 'inbox' && !open?.pendingApprovals.length
+        }
+        onInbox={() => go({ name: 'inbox' })}
       />
+      <InputBar
+        inputRef={inputRef}
+        onSend={(text) => send(text, open?.job.id)}
+        {...(open ? { about: open.job.title } : {})}
+        placeholder={
+          signedOut
+            ? 'Sign in to Claude first'
+            : connection.status !== 'connected'
+              ? 'Connecting… you can type already'
+              : open
+                ? 'Ask about this job'
+                : 'What do you want done?'
+        }
+        history={history}
+      />
+      <div className="sr-only" role="status" aria-live="polite">
+        {announce}
+      </div>
     </div>
   );
 }
