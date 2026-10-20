@@ -46,8 +46,8 @@ const core = new Core({
       ? createFakeAgent()
       : createAgent({
           apiKeyMode: env.MAI_API_KEY_MODE === '1',
-          // Headless Chromium gets bot-checked by Cloudflare-protected shops (alza.cz).
-          headedBrowser: env.MAI_BROWSER_HEADLESS !== '1',
+          // Headless by default (owner's choice); some Cloudflare-protected shops block it.
+          headedBrowser: env.MAI_BROWSER_HEADED === '1',
         }),
   workspace: env.MAI_WORKSPACE ?? join(home, 'mai'),
   home,

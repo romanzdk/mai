@@ -185,6 +185,11 @@ export class Store {
       .all() as { id: string; jobId: string }[];
   }
 
+  gitJobs(): Job[] {
+    const rows = this.db.prepare('SELECT * FROM jobs WHERE branch IS NOT NULL').all();
+    return (rows as unknown as JobRow[]).map(toJob);
+  }
+
   saveReport(jobId: string, report: Report): void {
     this.db
       .prepare('INSERT OR REPLACE INTO reports (job_id, body, created_at) VALUES (?, ?, ?)')

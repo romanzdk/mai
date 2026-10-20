@@ -38,6 +38,7 @@ interface PendingApproval {
 
 const TERMINAL: JobStatus[] = ['done', 'failed', 'cancelled'];
 const LOGIN_POLL_MS = 3000;
+const WORKTREE_SWEEP_MS = 10 * 60_000;
 const LOGIN_TIMEOUT_MS = 10 * 60_000;
 
 const isDir = (path: string) => statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
@@ -63,6 +64,7 @@ export class Core {
   private remembered = new Set<string>();
   private auth: { state: AuthState; detail?: string } = { state: 'checking' };
   private loginTimer?: ReturnType<typeof setInterval>;
+  private sweepTimer: ReturnType<typeof setInterval>;
 
   constructor(private readonly opts: CoreOptions) {
     const { store } = opts;
@@ -84,6 +86,9 @@ export class Core {
       );
     }
     this.schedule();
+    void this.sweepMergedWorktrees();
+    this.sweepTimer = setInterval(() => void this.sweepMergedWorktrees(), WORKTREE_SWEEP_MS);
+    this.sweepTimer.unref();
   }
 
   get store(): Store {
@@ -266,8 +271,47 @@ export class Core {
     return true;
   }
 
-  dismiss(jobId: string): void {
-    if (this.opts.store.job(jobId)) this.record(jobId, { kind: 'inbox_dismissed' });
+  dismiss(jobId: string): Promise<void> {
+    const job = this.opts.store.job(jobId);
+    if (!job) return Promise.resolve();
+    this.record(jobId, { kind: 'inbox_dismissed' });
+    return this.removeWorktree(job, 'dismissed', true);
+  }
+
+  // Only the worktree goes; the branch is the job's result and stays for the user. Never
+  // forced: git refuses when the worktree has uncommitted changes, and then it is kept.
+  private async removeWorktree(job: Job, why: string, reportFailure: boolean): Promise<void> {
+    if (!job.project || !job.branch || !TERMINAL.includes(job.status) || !isDir(job.cwd)) return;
+    try {
+      await run('git', ['-C', job.project, 'worktree', 'remove', job.cwd]);
+      this.record(job.id, {
+        kind: 'job_text',
+        text: `Removed the worktree ${job.cwd} (${why}); branch ${job.branch} is kept.`,
+      });
+    } catch (e) {
+      if (!reportFailure) return;
+      const detail = (e as { stderr?: string }).stderr?.trim() || message(e);
+      this.record(job.id, { kind: 'job_text', text: `Kept the worktree ${job.cwd}: ${detail}` });
+    }
+  }
+
+  async sweepMergedWorktrees(): Promise<void> {
+    for (const job of this.opts.store.gitJobs()) {
+      if (!job.project || !job.branch || !TERMINAL.includes(job.status) || !isDir(job.cwd))
+        continue;
+      const merged = await run('git', [
+        '-C',
+        job.project,
+        'merge-base',
+        '--is-ancestor',
+        job.branch,
+        'HEAD',
+      ]).then(
+        () => true,
+        () => false,
+      );
+      if (merged) await this.removeWorktree(job, `branch merged into ${job.project}`, false);
+    }
   }
 
   openFolder(jobId: string): void {
@@ -384,6 +428,7 @@ export class Core {
 
   shutdown(): void {
     clearInterval(this.loginTimer);
+    clearInterval(this.sweepTimer);
     for (const state of this.running.values()) state.abort.abort();
     this.opts.agent.close();
   }

@@ -142,3 +142,61 @@ test('an older database gets the new job columns', () => {
   store.insertJob({ ...base, id: 'a', status: 'done', project: '/p', branch: 'mai/a' });
   expect(store.job('a')).toMatchObject({ project: '/p', branch: 'mai/a' });
 });
+
+async function doneGitJob() {
+  const project = repo();
+  const { core } = setup(project);
+  await core.handleInput('i', 'x');
+  await settle();
+  const job = core.store.jobs()[0];
+  if (!job?.branch) throw new Error('expected a git job');
+  return { core, project, job };
+}
+
+const commitIn = (dir: string, file: string) => {
+  writeFileSync(join(dir, file), 'x\n');
+  git(dir, 'add', '.');
+  git(
+    dir,
+    '-c',
+    'user.name=t',
+    '-c',
+    'user.email=t@t',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '-qm',
+    file,
+  );
+};
+
+test('a merged branch gets its worktree removed; the branch stays', async () => {
+  const { core, project, job } = await doneGitJob();
+  commitIn(job.cwd, 'ci.yml');
+  await core.sweepMergedWorktrees();
+  expect(existsSync(job.cwd)).toBe(true);
+
+  git(project, 'merge', '-q', '--ff-only', job.branch ?? '');
+  await core.sweepMergedWorktrees();
+  expect(existsSync(job.cwd)).toBe(false);
+  expect(git(project, 'branch', '--list', job.branch ?? '')).toContain(job.branch);
+  expect(core.store.jobEvents(job.id).at(-1)).toMatchObject({
+    kind: 'job_text',
+    text: expect.stringContaining('Removed the worktree'),
+  });
+});
+
+test('dismiss removes a clean worktree but keeps one with uncommitted work', async () => {
+  const clean = await doneGitJob();
+  await clean.core.dismiss(clean.job.id);
+  expect(existsSync(clean.job.cwd)).toBe(false);
+
+  const dirty = await doneGitJob();
+  writeFileSync(join(dirty.job.cwd, 'wip.txt'), 'unsaved\n');
+  await dirty.core.dismiss(dirty.job.id);
+  expect(existsSync(join(dirty.job.cwd, 'wip.txt'))).toBe(true);
+  expect(dirty.core.store.jobEvents(dirty.job.id).at(-1)).toMatchObject({
+    kind: 'job_text',
+    text: expect.stringContaining('Kept the worktree'),
+  });
+});

@@ -157,8 +157,9 @@ cargo and the like.
 ## 023 — Browser hands: Playwright MCP, isolated, headed (2026-10-20)
 
 Each worker gets its own `@playwright/mcp` server (Chromium, `--isolated` in-memory profile, so
-no cookies or logins of the user's). It runs headed by default: headless Chromium got a
-Cloudflare 403 on alza.cz, the headed one passed. `MAI_BROWSER_HEADLESS=1` hides it.
+no cookies or logins of the user's). It runs headless by default (owner's choice, 2026-10-20). Known cost:
+headless Chromium got a Cloudflare 403 on alza.cz where a headed one passed;
+`MAI_BROWSER_HEADED=1` shows the browser.
 `pnpm install` downloads the matching Chromium (skipped in CI).
 
 ## 024 — Web actions that need approval (2026-10-20)
@@ -175,7 +176,9 @@ A job whose `cwd` is a git repo gets `git worktree add -b mai/<id> ~/mai/jobs/<i
 The user's checkout is never touched, uncommitted local changes are not included, and jobs on
 the same repo run side by side. The worker commits there and never pushes (push needs
 approval). A follow-up job on that job's folder branches from the previous job's branch.
-Worktrees are left in place for review; cleanup is manual for now. Workers must not disable
+The worktree is removed (never forced, so uncommitted work keeps it) when the
+job is dismissed, or when its branch is merged into the project's HEAD (checked at start and
+every 10 min). The branch itself is never deleted. Workers must not disable
 commit signing: if signing fails they leave changes uncommitted.
 
 ## 026 — Follow-ups and history search (2026-10-20)

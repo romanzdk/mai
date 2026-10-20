@@ -40,7 +40,7 @@ In Claude Code's Bash on the owner's Mac, `node`/`npm` are broken nvm shell func
 `unset -f node npm npx nvm; export PATH=$HOME/.nvm/versions/node/v24.21.0/bin:$PATH`.
 
 Daemon env: `MAI_TOKEN` (required), `MAI_PORT`, `MAI_DATA_DIR`, `MAI_DB`, `MAI_WORKSPACE`
-(default `~/mai`), `MAI_MAX_PARALLEL` (2), `MAI_API_KEY_MODE=1`, `MAI_BROWSER_HEADLESS=1`,
+(default `~/mai`), `MAI_MAX_PARALLEL` (2), `MAI_API_KEY_MODE=1`, `MAI_BROWSER_HEADED=1`,
 `MAI_FAKE_AGENT=1` (no model calls).
 
 ## Conventions

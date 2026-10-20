@@ -237,6 +237,16 @@ function JobView({
         <button type="button" className="button" onClick={onFollowUp}>
           Ask follow-up
         </button>
+        {!active && !state.dismissed && (
+          <button
+            type="button"
+            className="button"
+            title={state.job.branch ? 'Also removes the job worktree; the branch stays' : undefined}
+            onClick={() => act({ type: 'dismiss', jobId: id })}
+          >
+            Dismiss
+          </button>
+        )}
       </div>
       {state.pendingApprovals.map((a) => (
         <ApprovalCard key={a.approvalId} approval={a} job={state} act={act} />

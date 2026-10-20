@@ -88,7 +88,7 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
           core.retry(String(msg.jobId));
           break;
         case 'dismiss':
-          core.dismiss(String(msg.jobId));
+          void core.dismiss(String(msg.jobId));
           break;
         case 'open_folder':
           core.openFolder(String(msg.jobId));
