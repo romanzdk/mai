@@ -275,6 +275,7 @@ export function App() {
                   </li>
                 ))}
               </ul>
+              {active.length > 0 && <h2 className="label">in progress</h2>}
               <ul>
                 {active.map((j) => (
                   <li key={j.job.id}>
