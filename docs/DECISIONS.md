@@ -233,3 +233,22 @@ above the board on windows narrower than 1180 px.
 The view stays pinned to the bottom unless the user scrolls up themselves: only wheel, touch,
 scrollbar drag and PageUp unpin it, because the browser's own scroll adjustments during
 reflow were unpinning it on resize.
+
+## 029 — Settings, spending guards, notifications, hung jobs (2026-10-20)
+
+- **Settings** live in the daemon's SQLite (`settings` table) and are edited on one Settings
+  page (⌘,). `applySettings` in `packages/protocol` is the single validator (known keys,
+  types, ranges) used by the daemon, so the UI is never trusted. Precedence: built-in
+  defaults < `MAI_*` environment variables < saved settings. Changes apply live: a new desk
+  model or billing mode restarts the desk session on its next turn; parallelism re-runs the
+  scheduler; models and caps apply to new jobs.
+- **Spending guards:** each worker gets `maxTurns` (default 200) and `maxBudgetUsd`
+  (default 20 API-equivalent dollars, 0 = no cap); the SDK's cap stops are reported as
+  "stopped: reached the limit of …". New jobs are **held** (stay queued) while the 5-hour
+  or weekly plan window is at or above a threshold (default 95 %, 100 = never); a banner
+  explains why and offers "Run anyway", which lifts the hold until that window resets. The
+  desk is told about the hold so it can say so.
+- **Hung jobs:** a running job with no new step for `jobIdleMinutes` (default 30) is stopped
+  and reported as failed. Time waiting for an approval does not count.
+- **Notifications:** `tauri-plugin-notification`, only while mai is unfocused or hidden, for
+  approvals and finished or failed jobs; switchable in Settings.

@@ -3,9 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
-import { type Agent, type ApprovalRequest, WORKER_MODEL } from '@mai/agent';
+import type { Agent, ApprovalRequest } from '@mai/agent';
 import {
   type AuthState,
+  applySettings,
+  DEFAULT_SETTINGS,
   type EventBody,
   type Job,
   type JobSpec,
@@ -13,23 +15,36 @@ import {
   PROTOCOL_VERSION,
   REMEMBERABLE_RULES,
   type ServerMessage,
+  type Settings,
   type Usage,
+  type UsageWindow,
 } from '@mai/protocol';
 import type { Store } from './store';
 
 export interface CoreOptions {
   store: Store;
   agent: Agent;
-  workspace: string;
   home: string;
-  maxParallel: number;
+  // Starting values; settings saved from the UI win over them.
+  settings?: Settings;
+  workspace?: string;
+  maxParallel?: number;
 }
 
 interface RunState {
   abort: AbortController;
   cancelled: boolean;
   denied?: string;
+  timedOut?: boolean;
+  lastActivity: number;
 }
+
+const IDLE_CHECK_MS = 15_000;
+
+const hhmm = (iso: string | null) =>
+  iso
+    ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+    : '';
 
 interface PendingApproval {
   jobId: string;
@@ -78,9 +93,19 @@ export class Core {
   private usageTimer: ReturnType<typeof setInterval>;
   private usageState: Usage | null = null;
   private usageCheckedAt = 0;
+  private settingsState: Settings;
+  // "Run anyway": the plan-limit pause is lifted until this time.
+  private pauseOverrideUntil = 0;
+  private lastPaused: string | null = null;
 
   constructor(private readonly opts: CoreOptions) {
     const { store } = opts;
+    const initial = opts.settings ?? {
+      ...DEFAULT_SETTINGS,
+      workspace: opts.workspace ?? join(opts.home, 'mai'),
+      maxParallel: opts.maxParallel ?? DEFAULT_SETTINGS.maxParallel,
+    };
+    this.settingsState = applySettings(initial, store.getSettings());
     // Nothing that was in flight when the daemon stopped has a live worker any more.
     for (const approval of store.pendingApprovals()) {
       store.decideApproval(approval.id, 'expired');
@@ -120,6 +145,54 @@ export class Core {
       return;
     }
     this.broadcast({ v: PROTOCOL_VERSION, type: 'usage', usage: this.usageState });
+    this.schedule();
+  }
+
+  get settings(): Settings {
+    return this.settingsState;
+  }
+
+  updateSettings(patch: unknown): void {
+    const prev = this.settingsState;
+    const next = applySettings(prev, patch);
+    this.settingsState = next;
+    this.opts.store.saveSettings(next);
+    this.broadcast({ v: PROTOCOL_VERSION, type: 'settings', settings: next });
+    if (prev.deskModel !== next.deskModel || prev.apiKeyMode !== next.apiKeyMode) {
+      this.opts.agent.reconfigure();
+    }
+    if (prev.apiKeyMode !== next.apiKeyMode) {
+      void this.checkAuth().then(() => this.refreshUsage(true));
+    }
+    this.schedule();
+  }
+
+  // The plan window that is at or over the pause threshold, if any.
+  private blockingWindow(): { name: string; w: UsageWindow } | undefined {
+    const limit = this.settingsState.pauseAtUsagePct;
+    if (limit >= 100 || Date.now() < this.pauseOverrideUntil || !this.usageState) return undefined;
+    const windows = [
+      { name: 'the 5-hour limit', w: this.usageState.fiveHour },
+      { name: 'the weekly limit', w: this.usageState.week },
+    ];
+    return windows.find((x): x is { name: string; w: UsageWindow } =>
+      Boolean(x.w && x.w.pct !== null && x.w.pct >= limit),
+    );
+  }
+
+  get paused(): string | null {
+    const b = this.blockingWindow();
+    if (!b) return null;
+    const resets = hhmm(b.w.resetsAt);
+    return `${b.name} is at ${b.w.pct}%${resets ? ` (resets ${resets})` : ''}`;
+  }
+
+  resumeAnyway(): void {
+    const b = this.blockingWindow();
+    if (!b) return;
+    const until = b.w.resetsAt ? Date.parse(b.w.resetsAt) : Number.NaN;
+    this.pauseOverrideUntil = Number.isFinite(until) ? until : Date.now() + 3600_000;
+    this.schedule();
   }
 
   get store(): Store {
@@ -165,6 +238,9 @@ export class Core {
     const ctx = {
       now: new Date(),
       ...(about ? { about: this.aboutContext(about) } : {}),
+      ...(this.paused
+        ? { notice: `New jobs are on hold because ${this.paused}; they wait in the queue.` }
+        : {}),
       jobs: store.jobs(undefined, 20),
       reports: store.recentReports(5).map((r) => ({
         jobId: r.jobId,
@@ -214,7 +290,7 @@ export class Core {
 
   private createJob(spec: JobSpec): Job {
     const id = shortId();
-    const jobDir = join(this.opts.workspace, 'jobs', id);
+    const jobDir = join(this.settingsState.workspace, 'jobs', id);
     // A git project gets its own worktree and branch, so the user's checkout is never touched
     // and jobs on the same repo can run side by side.
     const git =
@@ -226,7 +302,7 @@ export class Core {
       title: spec.title,
       spec,
       status: 'queued',
-      model: spec.model ?? WORKER_MODEL,
+      model: spec.model ?? this.settingsState.workerModel,
       cwd: git?.cwd ?? spec.cwd ?? jobDir,
       createdAt: Date.now(),
       finishedAt: null,
@@ -237,7 +313,13 @@ export class Core {
   }
 
   private schedule(): void {
-    const free = this.opts.maxParallel - this.running.size;
+    const paused = this.paused;
+    if (paused !== this.lastPaused) {
+      this.lastPaused = paused;
+      this.broadcast({ v: PROTOCOL_VERSION, type: 'scheduler', paused });
+    }
+    if (paused) return;
+    const free = this.settingsState.maxParallel - this.running.size;
     if (free <= 0) return;
     for (const job of this.opts.store.jobs('queued', free)) void this.run(job);
   }
@@ -411,11 +493,25 @@ export class Core {
   }
 
   private async run(job: Job): Promise<void> {
-    const state: RunState = { abort: new AbortController(), cancelled: false };
+    const state: RunState = {
+      abort: new AbortController(),
+      cancelled: false,
+      lastActivity: Date.now(),
+    };
     this.running.set(job.id, state);
     this.setStatus(job.id, 'running');
+    // A job waiting for the user is not hung; only time without new steps counts.
+    const idle = setInterval(() => {
+      const waiting = [...this.pending.values()].some((p) => p.jobId === job.id);
+      if (waiting) state.lastActivity = Date.now();
+      const limit = this.settingsState.jobIdleMinutes * 60_000;
+      if (Date.now() - state.lastActivity > limit && !state.cancelled) {
+        state.timedOut = true;
+        state.abort.abort();
+      }
+    }, IDLE_CHECK_MS);
     try {
-      const jobDir = join(this.opts.workspace, 'jobs', job.id);
+      const jobDir = join(this.settingsState.workspace, 'jobs', job.id);
       if (job.project && job.branch) {
         mkdirSync(jobDir, { recursive: true });
         await run('git', [
@@ -443,13 +539,17 @@ export class Core {
         ...(job.spec.cwd && !job.branch ? {} : { jobDir }),
         ...(job.project && job.branch ? { git: { project: job.project, branch: job.branch } } : {}),
         signal: state.abort.signal,
-        onEvent: (e) =>
+        maxTurns: this.settingsState.jobMaxTurns,
+        maxCostUsd: this.settingsState.jobMaxCostUsd,
+        onEvent: (e) => {
+          state.lastActivity = Date.now();
           this.record(
             job.id,
             e.kind === 'tool'
               ? { kind: 'job_tool', tool: e.tool, summary: e.summary }
               : { kind: 'job_text', text: e.text },
-          ),
+          );
+        },
         requestApproval: (req) => this.requestApproval(job, req),
       });
       if (state.cancelled) {
@@ -464,7 +564,10 @@ export class Core {
       }));
       this.opts.store.saveReport(job.id, report);
       this.record(job.id, { kind: 'job_report', report });
-      if (state.denied) this.setStatus(job.id, 'failed', `you denied: ${state.denied}`);
+      if (state.timedOut) {
+        const minutes = this.settingsState.jobIdleMinutes;
+        this.setStatus(job.id, 'failed', `stopped: no activity for ${minutes} minutes`);
+      } else if (state.denied) this.setStatus(job.id, 'failed', `you denied: ${state.denied}`);
       else
         this.setStatus(
           job.id,
@@ -474,6 +577,7 @@ export class Core {
     } catch (e) {
       this.setStatus(job.id, state.cancelled ? 'cancelled' : 'failed', message(e));
     } finally {
+      clearInterval(idle);
       this.running.delete(job.id);
       this.schedule();
       void this.refreshUsage();

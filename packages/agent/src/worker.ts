@@ -15,6 +15,9 @@ export interface WorkerArgs {
   home: string;
   apiKeyMode: boolean;
   headedBrowser: boolean;
+  maxTurns: number;
+  // 0 means no cap.
+  maxCostUsd: number;
   // The job's own workspace folder; absent for plain (non-git) project folders.
   jobDir?: string;
   // Set when the job works in a git worktree made for it.
@@ -76,6 +79,16 @@ export function summarizeToolInput(input: unknown): string {
   return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
 
+export function stoppedBecause(subtype: string, caps: Pick<WorkerArgs, 'maxTurns' | 'maxCostUsd'>) {
+  if (subtype === 'error_max_turns') {
+    return `stopped: reached the limit of ${caps.maxTurns} steps (change it in Settings)`;
+  }
+  if (subtype === 'error_max_budget_usd') {
+    return `stopped: reached the cost cap of $${caps.maxCostUsd} (change it in Settings)`;
+  }
+  return `stopped: ${subtype.replace(/^error_/, '').replaceAll('_', ' ')}`;
+}
+
 export async function runWorker(args: WorkerArgs): Promise<WorkerResult> {
   const { spec, cwd, model, home, jobDir, git, apiKeyMode, signal, onEvent, requestApproval } =
     args;
@@ -123,6 +136,8 @@ export async function runWorker(args: WorkerArgs): Promise<WorkerResult> {
         append: appendPrompt({ home, jobDir, ...(git ? { git } : {}) }),
       },
       mcpServers: { playwright: playwrightServer(jobDir ?? cwd, args.headedBrowser) },
+      maxTurns: args.maxTurns,
+      ...(args.maxCostUsd > 0 ? { maxBudgetUsd: args.maxCostUsd } : {}),
       permissionMode: 'dontAsk',
       allowedTools: ALLOWED_TOOLS,
       // Jobs may read and write anywhere in ~ without approval (docs/DECISIONS.md 004).
@@ -175,7 +190,7 @@ export async function runWorker(args: WorkerArgs): Promise<WorkerResult> {
         }
       } else if (m.type === 'result') {
         const ok = m.subtype === 'success' && !m.is_error;
-        return done(ok, m.subtype === 'success' ? m.result : `stopped: ${m.subtype}`);
+        return done(ok, m.subtype === 'success' ? m.result : stoppedBecause(m.subtype, args));
       }
     }
     return done(false, signal.aborted ? 'cancelled' : 'worker ended without a result');

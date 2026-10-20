@@ -39,6 +39,7 @@ export function createFakeAgent(): Agent {
       return 'logged_in';
     },
     openLogin() {},
+    reconfigure() {},
     async usage() {
       const inHours = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
       return {

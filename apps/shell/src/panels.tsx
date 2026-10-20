@@ -53,6 +53,7 @@ export function TopBar({
   now,
   onInbox,
   onHistory,
+  onSettings,
 }: {
   connection: Connection;
   inboxCount: number;
@@ -61,6 +62,7 @@ export function TopBar({
   now: number;
   onInbox: () => void;
   onHistory: () => void;
+  onSettings: () => void;
 }) {
   const busy = [
     counts.running > 0 && { k: 'running', text: `${counts.running} running` },
@@ -133,6 +135,15 @@ export function TopBar({
         <button
           type="button"
           className="link"
+          data-shortcut="settings"
+          aria-keyshortcuts={keyShortcut(',')}
+          onClick={onSettings}
+        >
+          settings <Kbd k="," />
+        </button>
+        <button
+          type="button"
+          className="link"
           data-shortcut="history"
           aria-keyshortcuts={keyShortcut('F')}
           onClick={onHistory}
@@ -169,6 +180,7 @@ export function Notices({
   restart,
   approvals,
   showApprovalStrip,
+  paused,
   onInbox,
 }: {
   connection: Connection;
@@ -178,6 +190,7 @@ export function Notices({
   restart: () => void;
   approvals: { approval: ApprovalEvent; job: JobState }[];
   showApprovalStrip: boolean;
+  paused: string | null;
   onInbox: () => void;
 }) {
   const since = now - connection.since;
@@ -202,6 +215,18 @@ export function Notices({
       )}
       {(connection.status === 'starting' || connection.status === 'connecting') && since > 5000 && (
         <div className="banner">Starting mai…</div>
+      )}
+      {paused && (
+        <div className="banner" data-testid="paused">
+          <span>New jobs are on hold because {paused}. Queued jobs wait.</span>
+          <button
+            type="button"
+            className="button warn"
+            onClick={() => act({ type: 'resume_anyway' })}
+          >
+            Run anyway
+          </button>
+        </div>
       )}
       {auth.state === 'logged_out' && (
         <div className="banner" data-testid="login">

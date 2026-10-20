@@ -176,3 +176,38 @@ test('top bar shows job counts, plan usage and the clock; inbox sits in the side
   await side.getByRole('button', { name: 'Deny and stop job' }).first().click();
   await expect(row).toContainText('failed');
 });
+
+test('settings save, survive a reload, and are clamped by the daemon', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByTestId('daemon-status')).toContainText('daemon connected');
+  await page.keyboard.press('ControlOrMeta+,');
+  const view = page.getByTestId('settings');
+  const parallel = view.getByLabel('Jobs at once');
+  await parallel.fill('99');
+  await parallel.press('Enter');
+  await expect(parallel).toHaveValue('8');
+  await parallel.fill('3');
+  await parallel.press('Enter');
+  await page.reload();
+  await page.getByRole('button', { name: 'settings', exact: true }).click();
+  await expect(page.getByTestId('settings').getByLabel('Jobs at once')).toHaveValue('3');
+  await page.getByTestId('settings').getByLabel('Jobs at once').fill('2');
+  await page.getByTestId('settings').getByLabel('Jobs at once').press('Enter');
+});
+
+test('new jobs are held near the plan limit until "Run anyway"', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'settings', exact: true }).click();
+  const hold = page.getByTestId('settings').getByLabel('Hold new jobs at');
+  await hold.fill('40');
+  await hold.press('Enter');
+  const banner = page.getByTestId('paused');
+  await expect(banner).toContainText('the 5-hour limit is at 42%');
+  await page.keyboard.press('Escape');
+  await say(page, 'job held-me');
+  const row = page.getByTestId('board').getByRole('button', { name: /held-me/ });
+  await expect(row).toContainText('queued');
+  await banner.getByRole('button', { name: 'Run anyway' }).click();
+  await expect(row).toContainText('done');
+  await expect(banner).toHaveCount(0);
+});

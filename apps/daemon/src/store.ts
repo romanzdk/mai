@@ -1,5 +1,13 @@
 import { DatabaseSync } from 'node:sqlite';
-import type { ApprovalDecision, EventBody, Job, JobStatus, MaiEvent, Report } from '@mai/protocol';
+import type {
+  ApprovalDecision,
+  EventBody,
+  Job,
+  JobStatus,
+  MaiEvent,
+  Report,
+  Settings,
+} from '@mai/protocol';
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -33,6 +41,10 @@ CREATE TABLE IF NOT EXISTS approvals (
   decided_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS events_job ON events (job_id);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS reports (
   job_id TEXT PRIMARY KEY REFERENCES jobs(id),
   body TEXT NOT NULL,
@@ -183,6 +195,19 @@ export class Store {
     return this.db
       .prepare("SELECT id, job_id AS jobId FROM approvals WHERE status = 'pending'")
       .all() as { id: string; jobId: string }[];
+  }
+
+  getSettings(): unknown {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'settings'").get() as
+      | { value: string }
+      | undefined;
+    return row ? JSON.parse(row.value) : undefined;
+  }
+
+  saveSettings(settings: Settings): void {
+    this.db
+      .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('settings', ?)")
+      .run(JSON.stringify(settings));
   }
 
   gitJobs(): Job[] {

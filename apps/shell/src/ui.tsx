@@ -19,6 +19,7 @@ export const SHORTCUT_KEYS: Record<string, string> = {
   r: 'retry',
   o: 'open-folder',
   d: 'dismiss',
+  ',': 'settings',
 };
 
 export function Kbd({ k }: { k: string }) {

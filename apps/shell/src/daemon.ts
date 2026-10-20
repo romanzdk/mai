@@ -6,6 +6,7 @@ import {
   type MaiEvent,
   PROTOCOL_VERSION,
   type ServerMessage,
+  type Settings,
   type Usage,
 } from '@mai/protocol';
 import { invoke, isTauri } from '@tauri-apps/api/core';
@@ -44,6 +45,9 @@ export interface Daemon {
   }[];
   auth: { state: AuthState; detail?: string };
   usage: Usage | null;
+  settings: Settings | null;
+  // Why new jobs are on hold, or null.
+  paused: string | null;
   // Requests queue until connected, so nothing typed or dictated is lost. Actions do not:
   // a late approve could act on stale state, so act returns false when it sent nothing.
   send: (text: string, aboutJobId?: string) => void;
@@ -69,6 +73,8 @@ export function useDaemon(): Daemon {
   const [pending, setPending] = useState<Daemon['pending']>([]);
   const [auth, setAuth] = useState<{ state: AuthState; detail?: string }>({ state: 'checking' });
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [paused, setPaused] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const lastId = useRef(0);
   const outbox = useRef<ClientMessage[]>([]);
@@ -117,6 +123,10 @@ export function useDaemon(): Daemon {
           setDeltas((d) => ({ ...d, [msg.inputId]: msg.text }));
         } else if (msg?.type === 'usage') {
           setUsage(msg.usage);
+        } else if (msg?.type === 'settings') {
+          setSettings(msg.settings);
+        } else if (msg?.type === 'scheduler') {
+          setPaused(msg.paused);
         } else if (msg?.type === 'auth') {
           setAuth({ state: msg.state, ...(msg.detail ? { detail: msg.detail } : {}) });
         }
@@ -207,5 +217,18 @@ export function useDaemon(): Daemon {
     if (isTauri()) void invoke('restart_daemon').catch(() => {});
   }, []);
 
-  return { connection, home, events, deltas, pending, auth, usage, send, act, restart };
+  return {
+    connection,
+    home,
+    events,
+    deltas,
+    pending,
+    auth,
+    usage,
+    settings,
+    paused,
+    send,
+    act,
+    restart,
+  };
 }

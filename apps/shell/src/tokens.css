@@ -1530,3 +1530,59 @@ ol {
     transition: none !important;
   }
 }
+
+/* ---------- settings ---------- */
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 2);
+  max-width: 640px;
+  padding: calc(var(--space) * 2.5);
+  background: var(--glass), var(--glass-solid);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field > label {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.field-number {
+  display: flex;
+  align-items: center;
+  gap: var(--space);
+}
+
+.field-number input {
+  max-width: 120px;
+}
+
+.field-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 10px;
+}
+
+.field-toggle input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.field-toggle .field-hint {
+  grid-column: 2;
+}

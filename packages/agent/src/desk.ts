@@ -1,7 +1,7 @@
 import { type Query, query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Job, Report, Usage, UsageWindow } from '@mai/protocol';
 import { type DeskOutput, parseDeskOutput, visibleReply } from './parse';
-import { DESK_MODEL, ISOLATED, sdkEnv } from './sdk';
+import { ISOLATED, sdkEnv } from './sdk';
 
 const SYSTEM_PROMPT = `You are the front desk of mai, a personal AI shell on the user's computer. The user types or dictates requests. You reply fast and hand real work to background workers.
 
@@ -24,6 +24,8 @@ Each user message starts with a <context> block written by mai (not the user) wi
 
 export interface DeskContext {
   now: Date;
+  // Something the desk should mention if relevant, e.g. that new jobs are on hold.
+  notice?: string;
   // The job the user is asking a follow-up about.
   about?: { job: Job; report?: Report; lines: string[] };
   jobs: Pick<Job, 'id' | 'title' | 'status'>[];
@@ -43,7 +45,7 @@ function aboutBlock({ job, report, lines }: NonNullable<DeskContext['about']>): 
   ].join('\n');
 }
 
-function contextBlock({ now, jobs, reports, about }: DeskContext): string {
+function contextBlock({ now, jobs, reports, about, notice }: DeskContext): string {
   const time = now.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' });
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const jobLines = jobs.map((j) => `- ${j.id} [${j.status}] ${j.title}`).join('\n') || '- none';
@@ -54,7 +56,7 @@ function contextBlock({ now, jobs, reports, about }: DeskContext): string {
           `- ${r.jobId} ${r.title}: ${r.summary}${r.needs_you.length ? ` (needs you: ${r.needs_you.join('; ')})` : ''}`,
       )
       .join('\n') || '- none';
-  return `<context>\nLocal time: ${time} (${zone})\nJobs:\n${jobLines}\nRecent reports:\n${reportLines}${about ? `\n${aboutBlock(about)}` : ''}\n</context>`;
+  return `<context>\nLocal time: ${time} (${zone})\nJobs:\n${jobLines}\nRecent reports:\n${reportLines}${about ? `\n${aboutBlock(about)}` : ''}${notice ? `\nNote: ${notice}` : ''}\n</context>`;
 }
 
 interface Turn {
@@ -73,7 +75,7 @@ export class FrontDesk {
   private current: Turn | null = null;
   private chain: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly apiKeyMode: boolean) {}
+  constructor(private readonly config: () => { apiKeyMode: boolean; deskModel: string }) {}
 
   start(): void {
     if (this.q) return;
@@ -89,7 +91,7 @@ export class FrontDesk {
       prompt: input(),
       options: {
         ...ISOLATED,
-        model: DESK_MODEL,
+        model: this.config().deskModel,
         tools: [],
         settingSources: [],
         persistSession: false,
@@ -97,7 +99,7 @@ export class FrontDesk {
         effort: 'low',
         includePartialMessages: true,
         systemPrompt: SYSTEM_PROMPT,
-        env: sdkEnv(this.apiKeyMode),
+        env: sdkEnv(this.config().apiKeyMode),
       },
     });
     this.q = q;

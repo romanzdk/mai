@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createAgent } from '@mai/agent';
+import { applySettings, DEFAULT_SETTINGS, type Settings } from '@mai/protocol';
 import { Core } from './core';
 import { createFakeAgent } from './fake-agent';
 import { startServer } from './server';
@@ -39,19 +40,30 @@ const home = homedir();
 const dataDir = env.MAI_DATA_DIR ?? join(home, '.local', 'share', 'mai');
 mkdirSync(dataDir, { recursive: true });
 
-const core = new Core({
+// Defaults, then environment overrides (handy for testing); values saved in Settings win.
+const settings: Settings = applySettings(
+  { ...DEFAULT_SETTINGS, workspace: env.MAI_WORKSPACE ?? join(home, 'mai') },
+  {
+    ...(env.MAI_MAX_PARALLEL ? { maxParallel: Number(env.MAI_MAX_PARALLEL) } : {}),
+    ...(env.MAI_API_KEY_MODE === '1' ? { apiKeyMode: true } : {}),
+    ...(env.MAI_BROWSER_HEADED === '1' ? { browserHeaded: true } : {}),
+  },
+);
+
+let core: Core | undefined;
+const current = () => core?.settings ?? settings;
+core = new Core({
   store: new Store(env.MAI_DB ?? join(dataDir, 'mai.db')),
   agent:
     env.MAI_FAKE_AGENT === '1'
       ? createFakeAgent()
-      : createAgent({
-          apiKeyMode: env.MAI_API_KEY_MODE === '1',
-          // Headless by default (owner's choice); some Cloudflare-protected shops block it.
-          headedBrowser: env.MAI_BROWSER_HEADED === '1',
-        }),
-  workspace: env.MAI_WORKSPACE ?? join(home, 'mai'),
+      : createAgent(() => ({
+          apiKeyMode: current().apiKeyMode,
+          headedBrowser: current().browserHeaded,
+          deskModel: current().deskModel,
+        })),
   home,
-  maxParallel: Number(env.MAI_MAX_PARALLEL ?? 2),
+  settings,
 });
 
 const server = await startServer({ token, core, port: Number(env.MAI_PORT ?? 0) });

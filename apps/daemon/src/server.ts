@@ -55,6 +55,8 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
     });
     send({ v: PROTOCOL_VERSION, type: 'auth', ...core.authState });
     send({ v: PROTOCOL_VERSION, type: 'usage', usage: core.usage });
+    send({ v: PROTOCOL_VERSION, type: 'settings', settings: core.settings });
+    send({ v: PROTOCOL_VERSION, type: 'scheduler', paused: core.paused });
     ws.on('message', (data) => {
       const msg = decode<ClientMessage>(data.toString());
       if (!msg) return;
@@ -102,6 +104,12 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
           break;
         case 'open_folder':
           core.openFolder(String(msg.jobId));
+          break;
+        case 'set_settings':
+          core.updateSettings(msg.patch);
+          break;
+        case 'resume_anyway':
+          core.resumeAnyway();
           break;
         case 'login':
           core.login();

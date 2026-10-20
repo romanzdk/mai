@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { setAttention, useDaemon } from './daemon';
 import { derive, isActive, type JobState, jobCounts } from './derive';
 import { JobRow, JobView } from './job';
+import { notify } from './notify';
 import {
   Conversation,
   EmptyState,
@@ -13,12 +14,14 @@ import {
   Notices,
   TopBar,
 } from './panels';
+import { SettingsView } from './settings';
 import { isMod, SHORTCUT_KEYS, useNow } from './ui';
 
 type View =
   | { name: 'home' }
   | { name: 'inbox' }
   | { name: 'history' }
+  | { name: 'settings' }
   | { name: 'job'; id: string };
 
 const HOME: View = { name: 'home' };
@@ -45,8 +48,20 @@ function announcement(e: MaiEvent, jobs: Map<string, JobState>): string | undefi
 }
 
 export function App() {
-  const { connection, home, events, deltas, pending, auth, usage, send, act, restart } =
-    useDaemon();
+  const {
+    connection,
+    home,
+    events,
+    deltas,
+    pending,
+    auth,
+    usage,
+    settings,
+    paused,
+    send,
+    act,
+    restart,
+  } = useDaemon();
   const { jobs, exchanges, approvals, needsYou } = useMemo(() => derive(events), [events]);
   const byId = useMemo(() => new Map(jobs.map((j) => [j.job.id, j])), [jobs]);
   const now = useNow(1000);
@@ -182,6 +197,8 @@ export function App() {
   useEffect(() => () => pin.current?.disconnect(), []);
 
   const [announce, setAnnounce] = useState('');
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const announced = useRef(0);
   useEffect(() => {
     const fresh = events.filter((e) => e.id > announced.current);
@@ -194,6 +211,16 @@ export function App() {
       .filter(Boolean)
       .at(-1);
     if (text) setAnnounce(text);
+    // Desktop notifications only matter when the user is not looking at mai.
+    if (!settingsRef.current?.notifications || (document.hasFocus() && !document.hidden)) return;
+    for (const e of fresh) {
+      const title = e.jobId ? (byId.get(e.jobId)?.job.title ?? 'a job') : '';
+      if (e.kind === 'approval_requested') void notify(`Approval needed: ${title}`, e.command);
+      else if (e.kind === 'job_status' && e.status === 'done') void notify(`Done: ${title}`, '');
+      else if (e.kind === 'job_status' && e.status === 'failed') {
+        void notify(`Failed: ${title}`, e.error ?? '');
+      }
+    }
   }, [events, byId]);
 
   useEffect(() => {
@@ -229,6 +256,7 @@ export function App() {
         now={now}
         onInbox={() => go({ name: 'inbox' })}
         onHistory={() => go({ name: 'history' })}
+        onSettings={() => go({ name: 'settings' })}
       />
       <main
         ref={mainRef}
@@ -253,6 +281,8 @@ export function App() {
             onOpenJob={openJob}
             onRetry={retry}
           />
+        ) : view.name === 'settings' ? (
+          <SettingsView settings={settings} act={act} onBack={back} />
         ) : view.name === 'history' ? (
           <HistoryView jobs={jobs} now={now} onBack={back} onOpenJob={openJob} />
         ) : open ? (
@@ -346,6 +376,7 @@ export function App() {
         act={act}
         restart={restart}
         approvals={approvals}
+        paused={paused}
         showApprovalStrip={
           view.name !== 'home' && view.name !== 'inbox' && !open?.pendingApprovals.length
         }
