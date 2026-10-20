@@ -42,7 +42,11 @@ mkdirSync(dataDir, { recursive: true });
 
 // Defaults, then environment overrides (handy for testing); values saved in Settings win.
 const settings: Settings = applySettings(
-  { ...DEFAULT_SETTINGS, workspace: env.MAI_WORKSPACE ?? join(home, 'mai') },
+  {
+    ...DEFAULT_SETTINGS,
+    workspace: env.MAI_WORKSPACE ?? join(home, 'mai'),
+    contextDir: env.MAI_CONTEXT_DIR ?? join(home, 'context'),
+  },
   {
     ...(env.MAI_MAX_PARALLEL ? { maxParallel: Number(env.MAI_MAX_PARALLEL) } : {}),
     ...(env.MAI_API_KEY_MODE === '1' ? { apiKeyMode: true } : {}),
@@ -61,6 +65,7 @@ core = new Core({
           apiKeyMode: current().apiKeyMode,
           headedBrowser: current().browserHeaded,
           deskModel: current().deskModel,
+          contextDir: current().memory ? current().contextDir : null,
         })),
   home,
   settings,

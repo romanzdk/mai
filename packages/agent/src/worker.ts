@@ -1,6 +1,7 @@
 import { type HookCallback, query } from '@anthropic-ai/claude-agent-sdk';
 import type { JobSpec } from '@mai/protocol';
 import { playwrightServer } from './browser';
+import { loadMemory, memoryPrompt } from './memory';
 import { checkToolUse } from './policy';
 import { ISOLATED, sdkEnv } from './sdk';
 
@@ -26,6 +27,8 @@ export interface WorkerArgs {
   onEvent: (e: WorkerEvent) => void;
   // Resolves when the user decides; the worker session waits inside the hook meanwhile.
   requestApproval: (req: ApprovalRequest) => Promise<'approved' | 'denied'>;
+  // The owner's notes folder, when memory is on.
+  contextDir?: string;
 }
 
 export interface ApprovalRequest {
@@ -92,12 +95,18 @@ export function stoppedBecause(subtype: string, caps: Pick<WorkerArgs, 'maxTurns
 export async function runWorker(args: WorkerArgs): Promise<WorkerResult> {
   const { spec, cwd, model, home, jobDir, git, apiKeyMode, signal, onEvent, requestApproval } =
     args;
+  const memory = loadMemory(args.contextDir ?? null);
+  const memoryText = memory ? memoryPrompt(memory, 'worker') : '';
   const abortController = new AbortController();
   signal.addEventListener('abort', () => abortController.abort(), { once: true });
 
   const policyHook: HookCallback = async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {};
-    const decision = checkToolUse(input.tool_name, input.tool_input, { home, jobDir });
+    const decision = checkToolUse(input.tool_name, input.tool_input, {
+      home,
+      jobDir,
+      ...(args.contextDir ? { contextDir: args.contextDir } : {}),
+    });
     if (decision.allow) return {};
     const { ruleId, reason, command } = decision;
     const answer = await requestApproval({ ruleId, reason, tool: input.tool_name, command });
@@ -133,7 +142,7 @@ export async function runWorker(args: WorkerArgs): Promise<WorkerResult> {
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: appendPrompt({ home, jobDir, ...(git ? { git } : {}) }),
+        append: appendPrompt({ home, jobDir, ...(git ? { git } : {}) }) + memoryText,
       },
       mcpServers: { playwright: playwrightServer(jobDir ?? cwd, args.headedBrowser) },
       maxTurns: args.maxTurns,

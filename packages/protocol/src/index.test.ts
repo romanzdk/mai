@@ -22,7 +22,11 @@ test('rejects garbage and other protocol versions', () => {
 });
 
 test('settings patches keep only valid keys, types and ranges', () => {
-  const base: Settings = { ...DEFAULT_SETTINGS, workspace: '/Users/me/mai' };
+  const base: Settings = {
+    ...DEFAULT_SETTINGS,
+    workspace: '/Users/me/mai',
+    contextDir: '/Users/me/context',
+  };
   expect(
     applySettings(base, {
       maxParallel: 99,

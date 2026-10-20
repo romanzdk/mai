@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 // Rules whose approval may be remembered for the rest of a job. Never the ones that can lose
 // data or money: one remembered delete would silently allow any later delete in that job.
@@ -101,9 +101,12 @@ export interface Settings {
   // New jobs wait while a plan window is at or above this; 100 or more means never.
   pauseAtUsagePct: number;
   notifications: boolean;
+  // Give the desk and workers the owner's ~/context notes (docs/DECISIONS.md 030).
+  memory: boolean;
+  contextDir: string;
 }
 
-export const DEFAULT_SETTINGS: Omit<Settings, 'workspace'> = {
+export const DEFAULT_SETTINGS: Omit<Settings, 'workspace' | 'contextDir'> = {
   deskModel: 'claude-haiku-5-5',
   workerModel: 'claude-opus-5-5',
   maxParallel: 2,
@@ -114,6 +117,7 @@ export const DEFAULT_SETTINGS: Omit<Settings, 'workspace'> = {
   jobIdleMinutes: 30,
   pauseAtUsagePct: 95,
   notifications: true,
+  memory: true,
 };
 
 const RANGES: Partial<Record<keyof Settings, [number, number]>> = {
@@ -138,7 +142,7 @@ export function applySettings(current: Settings, patch: unknown): Settings {
     } else if (kind === 'boolean' && typeof value === 'boolean') {
       (next as Record<string, unknown>)[k] = value;
     } else if (kind === 'string' && typeof value === 'string' && value.trim()) {
-      if (k === 'workspace' && !value.trim().startsWith('/')) continue;
+      if ((k === 'workspace' || k === 'contextDir') && !value.trim().startsWith('/')) continue;
       (next as Record<string, unknown>)[k] = value.trim();
     }
   }

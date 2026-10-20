@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -119,4 +119,94 @@ test('the card shows what the web action targets', () => {
     ruleId: 'web-action',
     command: 'browser click: Buy now button',
   });
+});
+
+const context = join(home, 'context');
+mkdirSync(join(context, 'projects'), { recursive: true });
+writeFileSync(join(context, 'inbox.md'), '# Inbox\n- 2026-10-01 — old note\n');
+writeFileSync(join(context, 'me.md'), '# Me\n');
+const cctx = { home, jobDir, contextDir: context };
+const tool = (name: string, input: object) => checkToolUse(name, input, cctx);
+const sh = (command: string) => checkToolUse('Bash', { command }, cctx);
+
+test('appending to the context inbox needs no approval', () => {
+  expect(
+    tool('Edit', {
+      file_path: join(context, 'inbox.md'),
+      old_string: '- 2026-10-01 — old note',
+      new_string: '- 2026-10-01 — old note\n- 2026-10-20 — new note',
+    }),
+  ).toEqual({ allow: true });
+  expect(sh(`echo "- 2026-10-20 — x" >> ${context}/inbox.md`)).toEqual({ allow: true });
+  expect(sh('printf "x" >> ~/context/decisions.md')).toEqual({ allow: true });
+  expect(sh(`cat ${context}/people.md; grep -r stockwatch ~/context`)).toEqual({ allow: true });
+});
+
+test.each([
+  ['Write over the inbox', 'Write', { file_path: join(context, 'inbox.md'), content: 'x' }],
+  [
+    'Edit that rewrites an old line',
+    'Edit',
+    { file_path: join(context, 'inbox.md'), old_string: '# Inbox', new_string: '# Inbox\n- x' },
+  ],
+  [
+    'Edit of a hot file',
+    'Edit',
+    { file_path: join(context, 'me.md'), old_string: '# Me', new_string: '# Me\n- x' },
+  ],
+  [
+    'Write a new project file',
+    'Write',
+    { file_path: join(context, 'projects', 'x.md'), content: 'x' },
+  ],
+])('needs approval: %s', (_, name, input) => {
+  expect(tool(name, input)).toMatchObject({ allow: false, ruleId: 'context-write' });
+});
+
+test.each([
+  `echo x > ${context}/inbox.md`,
+  'echo x > ~/context/now.md',
+  'echo x >> ~/context/me.md',
+  `sed -i '' 's/a/b/' ${context}/projects.md`,
+  `cp notes.md ${context}/projects/`,
+  'mv draft.md "$HOME/context/work.md"',
+  'cd ~/context && git commit -am wip',
+  'tee ~/context/inbox.md < x',
+])('shell change needs approval: %s', (command) => {
+  expect(sh(command)).toMatchObject({ allow: false, ruleId: 'context-write' });
+});
+
+test('with memory off the context folder is just part of ~', () => {
+  const plain = checkToolUse(
+    'Write',
+    { file_path: join(context, 'me.md'), content: 'x' },
+    { home },
+  );
+  expect(plain).toEqual({ allow: true });
+});
+
+test('the braced HOME variable spelling is caught too', () => {
+  expect(sh(`echo x > "\${HOME}/context/now.md"`)).toMatchObject({ allow: false });
+});
+
+test('reading context notes never needs approval', () => {
+  for (const [name, input] of [
+    ['Read', { file_path: join(context, 'me.md') }],
+    ['Grep', { pattern: 'stockwatch', path: context }],
+    ['Glob', { pattern: '*.md', path: context }],
+  ] as const) {
+    expect(tool(name, input)).toEqual({ allow: true });
+  }
+});
+
+test('the approval card shows what a notes change would write', () => {
+  const d = tool('Edit', {
+    file_path: join(context, 'me.md'),
+    old_string: '# Me',
+    new_string: '# Me\n- likes green tea',
+  });
+  expect(d).toMatchObject({ allow: false });
+  expect(d.allow === false && d.command).toBe(
+    `Edit ${join(context, 'me.md')}\n- # Me\n+ # Me\n+ - likes green tea`,
+  );
 });

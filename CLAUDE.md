@@ -41,7 +41,8 @@ In Claude Code's Bash on the owner's Mac, `node`/`npm` are broken nvm shell func
 
 Daemon env: `MAI_TOKEN` (required), `MAI_PORT`, `MAI_DATA_DIR`, `MAI_DB`, `MAI_FAKE_AGENT=1`
 (no model calls). `MAI_WORKSPACE`, `MAI_MAX_PARALLEL`, `MAI_API_KEY_MODE=1` and
-`MAI_BROWSER_HEADED=1` only set defaults; the Settings page (stored in SQLite) wins.
+`MAI_BROWSER_HEADED=1` and `MAI_CONTEXT_DIR` only set defaults; the Settings page (stored in
+SQLite) wins.
 
 ## Conventions
 

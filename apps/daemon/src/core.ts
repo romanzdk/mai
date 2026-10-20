@@ -103,6 +103,7 @@ export class Core {
     const initial = opts.settings ?? {
       ...DEFAULT_SETTINGS,
       workspace: opts.workspace ?? join(opts.home, 'mai'),
+      contextDir: join(opts.home, 'context'),
       maxParallel: opts.maxParallel ?? DEFAULT_SETTINGS.maxParallel,
     };
     this.settingsState = applySettings(initial, store.getSettings());

@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 export type PolicyDecision =
@@ -9,6 +9,8 @@ export interface PolicyContext {
   home: string;
   // Deletes strictly inside this folder need no approval (docs/DECISIONS.md 004).
   jobDir?: string;
+  // The owner's notes folder: only appends to its inbox and decisions files are free.
+  contextDir?: string;
 }
 
 type Input = Record<string, unknown>;
@@ -135,8 +137,96 @@ function describe(tool: string, i: Input): string {
   return detail ? `${name}: ${detail}` : `${name}: ${JSON.stringify(i)}`;
 }
 
+const APPEND_ONLY = ['inbox.md', 'decisions.md'];
+const CONTEXT_REASON = 'changes your ~/context notes';
+
+const inside = (path: string, dir: string) => {
+  const real = realPath(resolve(path));
+  const root = realPath(dir);
+  return real === root || real.startsWith(root + sep);
+};
+
+// An Edit whose old text is the unique end of the file and whose new text starts with it.
+function isPureAppend(path: string, i: Input): boolean {
+  if (i.replace_all === true) return false;
+  const old = str(i.old_string);
+  const next = str(i.new_string);
+  if (!old || !next.startsWith(old)) return false;
+  try {
+    const content = readFileSync(path, 'utf8');
+    return (
+      content.trimEnd().endsWith(old.trimEnd()) && content.indexOf(old) === content.lastIndexOf(old)
+    );
+  } catch {
+    return false;
+  }
+}
+
+const WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
+
+function contextFileChange(tool: string, i: Input, ctx: PolicyContext): boolean {
+  const dir = ctx.contextDir;
+  if (!dir || !WRITE_TOOLS.includes(tool)) return false;
+  const file = str(i.file_path) || str(i.notebook_path);
+  if (!file || !inside(file, dir)) return false;
+  const appendOnly = APPEND_ONLY.some(
+    (name) => realPath(resolve(file)) === realPath(join(dir, name)),
+  );
+  return !(tool === 'Edit' && appendOnly && isPureAppend(file, i));
+}
+
+// ponytail: regex screen over the shell text; a determined script (python -c, a heredoc into
+// another tool) can still write there. Move to sandboxed execution if that ever matters.
+function contextShellChange(command: string, ctx: PolicyContext): boolean {
+  const dir = ctx.contextDir;
+  if (!dir) return false;
+  const spellings = [dir];
+  if (dir.startsWith(`${ctx.home}/`)) {
+    const rest = dir.slice(ctx.home.length);
+    spellings.push(`~${rest}`, `$HOME${rest}`, `\${HOME}${rest}`);
+  }
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const path = `["']?(?:${spellings.map(esc).join('|')})(?:/[^\\s"';|&)]*)?["']?`;
+  if (!new RegExp(path).test(command)) return false;
+  const appendTo = new RegExp(
+    `>>\\s*["']?(?:${spellings.map(esc).join('|')})/([^\\s"';|&)]+)`,
+    'g',
+  );
+  const overwrite = new RegExp(`(^|[^>])>\\s*${path}`);
+  if (overwrite.test(command)) return true;
+  for (const m of command.matchAll(appendTo)) {
+    if (!APPEND_ONLY.includes(m[1] ?? '')) return true;
+  }
+  const writer =
+    /(^|[\s;&|(`])(sed\s+[^|;&]*-i|tee|mv|cp|ln|touch|mkdir|truncate|rsync|install|chmod|chown|git|perl\s+[^|;&]*-i)(\s|$)/;
+  return writer.test(command);
+}
+
+// What the approval card shows for a notes change: the file and the text going in or out.
+function describeFileChange(tool: string, i: Input): string {
+  const clip = (t: string) => (t.length > 400 ? `${t.slice(0, 400)}…` : t);
+  const lines = (prefix: string, t: string) =>
+    clip(t)
+      .split('\n')
+      .map((l) => `${prefix} ${l}`)
+      .join('\n');
+  const path = str(i.file_path) || str(i.notebook_path);
+  if (tool === 'Edit') {
+    return `Edit ${path}\n${lines('-', str(i.old_string))}\n${lines('+', str(i.new_string))}`;
+  }
+  if (tool === 'Write') return `Write ${path}\n${lines('+', str(i.content))}`;
+  return `${tool} ${path}`;
+}
+
 export function checkToolUse(tool: string, input: unknown, ctx: PolicyContext): PolicyDecision {
   const i = (typeof input === 'object' && input !== null ? input : {}) as Input;
+  if (
+    contextFileChange(tool, i, ctx) ||
+    (tool === 'Bash' && contextShellChange(str(i.command), ctx))
+  ) {
+    const command = tool === 'Bash' ? str(i.command) : describeFileChange(tool, i);
+    return { allow: false, ruleId: 'context-write', reason: CONTEXT_REASON, command };
+  }
   const hits = RULES.filter((r) => r.tools.includes(tool) && r.matches(i));
   if (hits.length === 0) return { allow: true };
   const command = describe(tool, i);

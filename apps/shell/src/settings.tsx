@@ -235,6 +235,25 @@ export function SettingsView({
               save={save}
             />
           </section>
+          <section className="settings-group" aria-labelledby="set-memory">
+            <h2 id="set-memory" className="label">
+              memory
+            </h2>
+            <Toggle
+              name="memory"
+              label="Give the front desk and jobs my notes"
+              hint="me.md, now.md and projects.md are always included; other notes are read when relevant. Jobs may only append to inbox.md and decisions.md; any other change asks you first."
+              value={settings.memory}
+              save={save}
+            />
+            <TextField
+              name="contextDir"
+              label="Notes folder"
+              hint="Absolute path to your context folder."
+              value={settings.contextDir}
+              save={save}
+            />
+          </section>
           <section className="settings-group" aria-labelledby="set-other">
             <h2 id="set-other" className="label">
               other

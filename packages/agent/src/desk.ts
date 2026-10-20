@@ -1,5 +1,6 @@
 import { type Query, query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Job, Report, Usage, UsageWindow } from '@mai/protocol';
+import { loadMemory, memoryPrompt } from './memory';
 import { type DeskOutput, parseDeskOutput, visibleReply } from './parse';
 import { ISOLATED, sdkEnv } from './sdk';
 
@@ -75,10 +76,25 @@ export class FrontDesk {
   private current: Turn | null = null;
   private chain: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly config: () => { apiKeyMode: boolean; deskModel: string }) {}
+  // The memory text the running session was started with.
+  private memoryText = '';
+
+  constructor(
+    private readonly config: () => {
+      apiKeyMode: boolean;
+      deskModel: string;
+      contextDir: string | null;
+    },
+  ) {}
+
+  private memoryNow(): string {
+    const m = loadMemory(this.config().contextDir);
+    return m ? memoryPrompt(m, 'desk') : '';
+  }
 
   start(): void {
     if (this.q) return;
+    this.memoryText = this.memoryNow();
     const self = this;
     async function* input(): AsyncGenerator<SDKUserMessage> {
       while (true) {
@@ -98,7 +114,7 @@ export class FrontDesk {
         thinking: { type: 'disabled' },
         effort: 'low',
         includePartialMessages: true,
-        systemPrompt: SYSTEM_PROMPT,
+        systemPrompt: SYSTEM_PROMPT + this.memoryText,
         env: sdkEnv(this.config().apiKeyMode),
       },
     });
@@ -137,6 +153,8 @@ export class FrontDesk {
   turn(text: string, ctx: DeskContext, onDelta: (visible: string) => void): Promise<DeskResult> {
     const run = () =>
       new Promise<DeskResult>((resolve, reject) => {
+        // Notes changed since this session started: begin a fresh one that knows them.
+        if (this.q && this.memoryNow() !== this.memoryText) this.close();
         this.start();
         this.current = { text: '', onDelta, resolve, reject };
         this.pending.push({

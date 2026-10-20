@@ -252,3 +252,20 @@ reflow were unpinning it on resize.
   and reported as failed. Time waiting for an approval does not count.
 - **Notifications:** `tauri-plugin-notification`, only while mai is unfocused or hidden, for
   approvals and finished or failed jobs; switchable in Settings.
+
+## 030 — Memory from `~/context` (2026-10-20)
+
+Follows the folder's own README. Hot files (`me.md`, `now.md`, `projects.md`, cut at 12 KB)
+go into the desk's system prompt and every worker's prompt; the desk session restarts when
+they change, so it never answers from stale notes. Cold files are listed for workers to read
+or grep when relevant. Injected as prompt text rather than through `settingSources`, because
+that only loads CLAUDE.md files along the job's own folder.
+
+Writes follow the README too: only appends to `inbox.md` and `decisions.md` are free.
+`Edit` counts as an append only when its old text is the unique end of the file and the new
+text starts with it (the policy reads the file to check); `>>` into those two files is free.
+Any other change in the folder (Write, other edits, `>`, `sed -i`, `cp`/`mv` into it, git)
+needs approval, and the card shows the -/+ text. Reading is always free. "Remember that…"
+makes the desk dispatch a one-line append to `inbox.md`. Switch and folder are in Settings
+(default on, `~/context`). Ceiling: regex screen over shell text; see the policy's ponytail
+note.
