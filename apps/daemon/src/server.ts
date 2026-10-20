@@ -47,22 +47,51 @@ export function startServer({ token, core, port = 0 }: ServerOptions): Promise<R
     ws.on('close', () => unsubscribe?.());
 
     send({ v: PROTOCOL_VERSION, type: 'hello', daemonVersion: pkg.version, startedAt });
+    send({ v: PROTOCOL_VERSION, type: 'auth', ...core.authState });
     ws.on('message', (data) => {
       const msg = decode<ClientMessage>(data.toString());
-      if (msg?.type === 'ping') {
-        send({ v: PROTOCOL_VERSION, type: 'pong', id: msg.id, t: msg.t });
-      } else if (msg?.type === 'subscribe' && !unsubscribe) {
-        unsubscribe = core.subscribe(send);
-        for (const event of core.store.eventsSince(msg.since)) {
-          send({ v: PROTOCOL_VERSION, type: 'event', event });
-        }
-      } else if (
-        msg?.type === 'input' &&
-        typeof msg.text === 'string' &&
-        msg.text.trim() &&
-        msg.text.length <= MAX_INPUT_CHARS
-      ) {
-        void core.handleInput(String(msg.inputId), msg.text.trim());
+      if (!msg) return;
+      switch (msg.type) {
+        case 'ping':
+          send({ v: PROTOCOL_VERSION, type: 'pong', id: msg.id, t: msg.t });
+          break;
+        case 'subscribe':
+          if (unsubscribe) break;
+          unsubscribe = core.subscribe(send);
+          for (const event of core.store.eventsSince(Number(msg.since) || 0)) {
+            send({ v: PROTOCOL_VERSION, type: 'event', event });
+          }
+          break;
+        case 'input':
+          if (
+            typeof msg.text === 'string' &&
+            msg.text.trim() &&
+            msg.text.length <= MAX_INPUT_CHARS
+          ) {
+            void core.handleInput(String(msg.inputId), msg.text.trim());
+          }
+          break;
+        case 'approve':
+          core.decide(String(msg.approvalId), 'approved', 'you', msg.remember === true);
+          break;
+        case 'deny':
+          core.decide(String(msg.approvalId), 'denied', 'you');
+          break;
+        case 'cancel':
+          core.cancel(String(msg.jobId));
+          break;
+        case 'retry':
+          core.retry(String(msg.jobId));
+          break;
+        case 'dismiss':
+          core.dismiss(String(msg.jobId));
+          break;
+        case 'open_folder':
+          core.openFolder(String(msg.jobId));
+          break;
+        case 'login':
+          core.login();
+          break;
       }
     });
   });

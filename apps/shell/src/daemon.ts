@@ -1,4 +1,5 @@
 import {
+  type AuthState,
   type ClientMessage,
   decode,
   encode,
@@ -26,8 +27,17 @@ export interface Daemon {
   deltas: Record<string, string>;
   // Inputs sent but not yet echoed back as user_input events.
   pending: { inputId: string; text: string }[];
+  auth: { state: AuthState; detail?: string };
   send: (text: string) => void;
+  act: (msg: Action) => void;
 }
+
+// Client messages other than the connection plumbing, without the version field.
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+export type Action = DistributiveOmit<
+  Exclude<ClientMessage, { type: 'ping' | 'subscribe' | 'input' }>,
+  'v'
+>;
 
 const PING_MS = 2000;
 const RECONNECT_MS = 1000;
@@ -52,6 +62,7 @@ export function useDaemon(): Daemon {
   const [events, setEvents] = useState<MaiEvent[]>([]);
   const [deltas, setDeltas] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<{ inputId: string; text: string }[]>([]);
+  const [auth, setAuth] = useState<{ state: AuthState; detail?: string }>({ state: 'checking' });
   const wsRef = useRef<WebSocket | null>(null);
   const lastId = useRef(0);
 
@@ -94,6 +105,8 @@ export function useDaemon(): Daemon {
           onEvent(msg.event);
         } else if (msg?.type === 'desk_delta') {
           setDeltas((d) => ({ ...d, [msg.inputId]: msg.text }));
+        } else if (msg?.type === 'auth') {
+          setAuth({ state: msg.state, ...(msg.detail ? { detail: msg.detail } : {}) });
         }
       };
       ws.onopen = () => {
@@ -131,5 +144,11 @@ export function useDaemon(): Daemon {
     ws.send(encode({ v: PROTOCOL_VERSION, type: 'input', inputId, text }));
   }, []);
 
-  return { connection, events, deltas, pending, send };
+  const act = useCallback((msg: Action) => {
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN)
+      ws.send(encode({ v: PROTOCOL_VERSION, ...msg } as ClientMessage));
+  }, []);
+
+  return { connection, events, deltas, pending, auth, send, act };
 }

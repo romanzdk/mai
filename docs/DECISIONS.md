@@ -110,3 +110,46 @@ keeps it. The settings toggle comes with the settings page.
 
 `MAI_FAKE_AGENT=1` swaps in `apps/daemon/src/fake-agent.ts`: no model calls, so CI needs no
 login and spends nothing. Real-model checks are run by hand per milestone.
+
+## 017 — M2 (voice) skipped (2026-10-20)
+
+The owner dictates with Wispr Flow, which types into the focused input bar. Decisions 003 and
+the `packages/voice` plan are parked; the spec's `voice` extension point stays unbuilt.
+
+## 018 — Approvals: the hook waits (2026-10-20)
+
+A risky tool call creates an `approvals` row and an `approval_requested` event, sets the job to
+`waiting_approval`, and the worker's `PreToolUse` hook simply awaits the decision (matcher
+timeout one week). Approve → the call runs and the job goes back to `running`. Deny → the hook
+returns `deny` with `continue: false`, the session stops, a report is still written, and the
+job fails with `you denied: <command>`. On daemon restart, pending approvals become `expired`
+and their jobs fail. "Remember" covers the same rule in the same job folder until mai
+restarts; it never persists.
+
+## 019 — Deletes inside the job folder (2026-10-20)
+
+Free only when every target is an absolute or `~/` path that resolves, after symlinks, strictly
+inside the job's own folder, and the segment has no quotes, globs, braces, variables or
+substitutions. Relative paths always ask: the Bash tool keeps its own working directory
+between calls and the hook's `cwd` does not follow `cd` (measured). Project jobs (M4) have no
+free deletes. Known ceiling: this is a regex screen, not a shell parser; `mv x /dev/null`,
+`> file` truncation and similar are not caught.
+
+## 020 — Cancel and retry (2026-10-20)
+
+Cancel aborts the SDK query (the worker's Claude process and its child commands exit — measured),
+denies its pending approvals, and marks the job `cancelled` without a report. Retry creates a new
+job with the same spec and `retryOf`, in a fresh workspace folder. The desk can cancel by id via
+`<cancel>["id"]</cancel>`; it cannot approve anything — approvals are UI-only.
+
+## 021 — Login via the system terminal (2026-10-20)
+
+Auth is read with the SDK's bundled binary: `claude auth status --json`. "Sign in" opens the
+system terminal (Terminal.app / `x-terminal-emulator`) running `claude auth login` and polls
+status every 3 s for up to 10 min. No in-app terminal emulator, no native pty module.
+
+## 022 — Workers get the login shell's PATH (2026-10-20)
+
+Started from Finder or the dock, the app inherits launchd's short PATH. The daemon reads
+`$SHELL -ilc` once at start (5 s timeout) and uses that PATH, so workers find Homebrew, nvm,
+cargo and the like.

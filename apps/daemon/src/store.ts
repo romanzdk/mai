@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import type { EventBody, Job, JobStatus, MaiEvent, Report } from '@mai/protocol';
+import type { ApprovalDecision, EventBody, Job, JobStatus, MaiEvent, Report } from '@mai/protocol';
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -18,6 +18,17 @@ CREATE TABLE IF NOT EXISTS jobs (
   cwd TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   finished_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS approvals (
+  id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL REFERENCES jobs(id),
+  rule_id TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  command TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS reports (
   job_id TEXT PRIMARY KEY REFERENCES jobs(id),
@@ -97,10 +108,44 @@ export class Store {
   jobs(status?: JobStatus, limit = 50): Job[] {
     const rows = status
       ? this.db
-          .prepare('SELECT * FROM jobs WHERE status = ? ORDER BY created_at LIMIT ?')
+          .prepare('SELECT * FROM jobs WHERE status = ? ORDER BY created_at, rowid LIMIT ?')
           .all(status, limit)
-      : this.db.prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?').all(limit);
+      : this.db
+          .prepare('SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC LIMIT ?')
+          .all(limit);
     return (rows as unknown as JobRow[]).map(toJob);
+  }
+
+  job(id: string): Job | undefined {
+    const row = this.db.prepare('SELECT * FROM jobs WHERE id = ?').get(id);
+    return row ? toJob(row as unknown as JobRow) : undefined;
+  }
+
+  insertApproval(a: {
+    id: string;
+    jobId: string;
+    ruleId: string;
+    tool: string;
+    command: string;
+    reason: string;
+  }): void {
+    this.db
+      .prepare(
+        'INSERT INTO approvals (id, job_id, rule_id, tool, command, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(a.id, a.jobId, a.ruleId, a.tool, a.command, a.reason, Date.now());
+  }
+
+  decideApproval(id: string, status: ApprovalDecision): void {
+    this.db
+      .prepare('UPDATE approvals SET status = ?, decided_at = ? WHERE id = ?')
+      .run(status, Date.now(), id);
+  }
+
+  pendingApprovals(): { id: string; jobId: string }[] {
+    return this.db
+      .prepare("SELECT id, job_id AS jobId FROM approvals WHERE status = 'pending'")
+      .all() as { id: string; jobId: string }[];
   }
 
   saveReport(jobId: string, report: Report): void {

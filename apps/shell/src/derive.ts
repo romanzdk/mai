@@ -1,11 +1,16 @@
 import type { Job, JobStatus, MaiEvent, Report } from '@mai/protocol';
 
+export type ApprovalEvent = Extract<MaiEvent, { kind: 'approval_requested' }>;
+
 export interface JobState {
   job: Job;
   status: JobStatus;
   error?: string;
   timeline: MaiEvent[];
   report?: Report;
+  retryOf?: string;
+  pendingApprovals: ApprovalEvent[];
+  dismissed: boolean;
 }
 
 export interface Exchange {
@@ -25,16 +30,29 @@ export function timelineLine(e: MaiEvent): string {
       return `${e.tool} ${e.summary}`;
     case 'job_text':
       return e.text.split('\n')[0] ?? '';
-    case 'job_status':
-      return e.error ? `${e.status}: ${e.error}` : e.status;
+    case 'job_status': {
+      const status = e.status.replace('_', ' ');
+      return e.error ? `${status}: ${e.error}` : status;
+    }
     case 'job_report':
       return e.report.summary;
+    case 'approval_requested':
+      return `needs approval (${e.reason}): ${e.command}`;
+    case 'approval_decided':
+      return `${e.decision}${e.by === 'you' ? ' by you' : ` (${e.by})`}`;
     default:
       return '';
   }
 }
 
-export function derive(events: MaiEvent[]): { jobs: JobState[]; exchanges: Exchange[] } {
+export interface Derived {
+  jobs: JobState[];
+  exchanges: Exchange[];
+  approvals: { approval: ApprovalEvent; job: JobState }[];
+  needsYou: JobState[];
+}
+
+export function derive(events: MaiEvent[]): Derived {
   const jobs = new Map<string, JobState>();
   const exchanges = new Map<string, Exchange>();
 
@@ -55,12 +73,27 @@ export function derive(events: MaiEvent[]): { jobs: JobState[]; exchanges: Excha
       continue;
     }
     if (e.kind === 'job_created') {
-      jobs.set(e.job.id, { job: e.job, status: e.job.status, timeline: [] });
+      jobs.set(e.job.id, {
+        job: e.job,
+        status: e.job.status,
+        timeline: [],
+        pendingApprovals: [],
+        dismissed: false,
+        ...(e.retryOf ? { retryOf: e.retryOf } : {}),
+      });
       continue;
     }
     const state = e.jobId ? jobs.get(e.jobId) : undefined;
     if (!state) continue;
+    if (e.kind === 'inbox_dismissed') {
+      state.dismissed = true;
+      continue;
+    }
     state.timeline.push(e);
+    if (e.kind === 'approval_requested') state.pendingApprovals.push(e);
+    if (e.kind === 'approval_decided') {
+      state.pendingApprovals = state.pendingApprovals.filter((a) => a.approvalId !== e.approvalId);
+    }
     if (e.kind === 'job_status') {
       state.status = e.status;
       state.error = e.error;
@@ -69,8 +102,13 @@ export function derive(events: MaiEvent[]): { jobs: JobState[]; exchanges: Excha
     }
   }
 
+  const all = [...jobs.values()].sort((a, b) => b.job.createdAt - a.job.createdAt);
   return {
-    jobs: [...jobs.values()].sort((a, b) => b.job.createdAt - a.job.createdAt),
+    jobs: all,
     exchanges: [...exchanges.values()],
+    approvals: all.flatMap((job) => job.pendingApprovals.map((approval) => ({ approval, job }))),
+    needsYou: all.filter(
+      (j) => !ACTIVE.includes(j.status) && !j.dismissed && (j.report?.needs_you.length ?? 0) > 0,
+    ),
   };
 }

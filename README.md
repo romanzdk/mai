@@ -4,8 +4,10 @@ A personal AI shell for macOS and Ubuntu. You type or say what you want; a fast 
 answers or hands the work to background Claude workers, and every job ends with a short report.
 It runs full-screen on top of your normal OS. It is not a kernel or a distro.
 
-Status: **M1 text loop** — type a request; the front desk answers or dispatches a background
-worker, whose timeline and report show up on the board. See [docs/SPEC.md](docs/SPEC.md)
+Status: **M3 safety and parallelism** — type a request; the front desk answers or dispatches
+background workers (two at a time). Deletes outside a job's folder, sudo and git push pause the
+job behind an approval card. Jobs can be cancelled and retried; the inbox collects everything
+waiting for you. See [docs/SPEC.md](docs/SPEC.md)
 for the plan.
 
 ## Install and run

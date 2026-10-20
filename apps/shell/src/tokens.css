@@ -257,3 +257,94 @@ button {
 .timeline li[data-kind="job_text"] {
   font-family: var(--font);
 }
+
+.inbox-link {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.inbox-link[data-attention="true"] {
+  color: var(--warn);
+}
+
+.button {
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.button:hover,
+.button:focus-visible {
+  border-color: var(--muted);
+  outline: none;
+}
+
+.button.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space);
+}
+
+.approval,
+.needs-you,
+.banner {
+  background: var(--surface);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  padding: calc(var(--space) * 1.5) calc(var(--space) * 2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+}
+
+.banner {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.approval-head {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--space) * 2);
+}
+
+.approval-head .label {
+  margin: 0;
+  color: var(--warn);
+}
+
+.command {
+  font-family: var(--mono);
+  font-size: 13px;
+  margin: 0;
+  padding: var(--space);
+  background: var(--bg);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.needs-you ul {
+  margin: 0;
+  padding-left: 2ch;
+}
+
+.needs-you .button {
+  align-self: flex-start;
+}

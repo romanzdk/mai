@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { parseDeskOutput, visibleReply } from './parse';
 
 test('plain answer has no jobs', () => {
-  expect(parseDeskOutput("It's 09:30.")).toEqual({ reply: "It's 09:30.", jobs: [] });
+  expect(parseDeskOutput("It's 09:30.")).toEqual({ reply: "It's 09:30.", jobs: [], cancel: [] });
 });
 
 test('dispatch block becomes jobs and is removed from the reply', () => {
@@ -12,6 +12,7 @@ test('dispatch block becomes jobs and is removed from the reply', () => {
   expect(out).toEqual({
     reply: 'On it.',
     jobs: [{ title: 'Notes', prompt: 'Create ~/Desktop/notes', cwd: '/tmp/x' }],
+    cancel: [],
   });
 });
 
@@ -39,4 +40,25 @@ test('streaming view hides the block and a partial opening tag', () => {
   expect(visibleReply('On it. <disp')).toBe('On it.');
   expect(visibleReply('1 < 2')).toBe('1 < 2');
   expect(visibleReply('a <b>')).toBe('a <b>');
+});
+
+test('cancel block lists job ids', () => {
+  expect(parseDeskOutput('Stopping it.\n<cancel>["ab12cd34"]</cancel>')).toEqual({
+    reply: 'Stopping it.',
+    jobs: [],
+    cancel: ['ab12cd34'],
+  });
+});
+
+test('a bad cancel block also drops a valid dispatch', () => {
+  const out = parseDeskOutput(
+    'Ok <dispatch>[{"title":"a","prompt":"b"}]</dispatch><cancel>[42]</cancel>',
+  );
+  expect(out).toMatchObject({ reply: 'Ok', jobs: [], cancel: [] });
+  expect(out.error).toContain('cancel');
+});
+
+test('streaming view hides a partial cancel tag', () => {
+  expect(visibleReply('Stopping. <canc')).toBe('Stopping.');
+  expect(visibleReply('Stopping. <cancel>["a')).toBe('Stopping.');
 });

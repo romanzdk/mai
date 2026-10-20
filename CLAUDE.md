@@ -13,11 +13,13 @@ Personal AI shell (spec: `docs/SPEC.md`, working name there is Helm). Decisions:
 - `packages/protocol` — versioned JSON message types (`PROTOCOL_VERSION`), consumed as TS source.
 - `packages/agent` — Agent SDK wrappers: front desk (`desk.ts`, one warm Haiku session, streamed
   text + `<dispatch>` block), workers (`worker.ts`, Opus, policy hook), reports (`report.ts`),
-  approval rules (`policy.ts`).
+  approval rules (`policy.ts`), login helpers (`auth.ts`).
 - Daemon flow: input → `user_input` event → desk turn (`desk_delta` streamed, `desk_reply`
   stored) → jobs (`core.ts` scheduler, max 2 parallel) → worker events → report → status.
   Everything the UI shows is the append-only `events` table (`store.ts`), replayed on connect.
-- Planned: `packages/voice` (whisper-server).
+- Approvals: worker `PreToolUse` hook → `Core.requestApproval` → job `waiting_approval` → UI card
+  → `approve`/`deny` message → `Core.decide` resolves the waiting hook. Cancel/retry/dismiss are
+  `Core` methods too. Voice (M2) is skipped.
 
 All model calls go through `@anthropic-ai/claude-agent-sdk`. Never read, store or proxy OAuth
 tokens; never call the Messages API directly.

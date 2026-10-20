@@ -55,3 +55,37 @@ test('events for unknown jobs or inputs are ignored', () => {
   expect(jobs).toEqual([]);
   expect(exchanges).toEqual([]);
 });
+
+test('pending approvals and needs-you reports make up the inbox', () => {
+  const report = { summary: 's', changes: [], artifacts: [], needs_you: ['check it'] };
+  const ask = (approvalId: string) =>
+    ({
+      kind: 'approval_requested',
+      approvalId,
+      ruleId: 'delete',
+      tool: 'Bash',
+      command: 'rm x',
+      reason: 'deletes files',
+    }) as const;
+  const job2 = { ...job, id: 'j2', createdAt: 6 };
+  const d = derive([
+    ev('j1', { kind: 'job_created', job }),
+    ev('j1', ask('a1')),
+    ev('j1', ask('a2')),
+    ev('j1', { kind: 'approval_decided', approvalId: 'a1', decision: 'approved', by: 'you' }),
+    ev('j2', { kind: 'job_created', job: job2, retryOf: 'j1' }),
+    ev('j2', { kind: 'job_report', report }),
+    ev('j2', { kind: 'job_status', status: 'done' }),
+  ]);
+  expect(d.approvals.map((a) => a.approval.approvalId)).toEqual(['a2']);
+  expect(d.needsYou.map((j) => j.job.id)).toEqual(['j2']);
+  expect(d.jobs.find((j) => j.job.id === 'j2')?.retryOf).toBe('j1');
+
+  const after = derive([
+    ev('j2', { kind: 'job_created', job: job2 }),
+    ev('j2', { kind: 'job_report', report }),
+    ev('j2', { kind: 'job_status', status: 'done' }),
+    ev('j2', { kind: 'inbox_dismissed' }),
+  ]);
+  expect(after.needsYou).toEqual([]);
+});

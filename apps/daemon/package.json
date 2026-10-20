@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/daemon.mjs --external:@anthropic-ai/claude-agent-sdk --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/daemon.mjs --external:@anthropic-ai/claude-agent-sdk --banner:js=\"import { createRequire as maiCreateRequire } from 'node:module'; const require = maiCreateRequire(import.meta.url);\"",
     "start": "node dist/daemon.mjs",
     "typecheck": "tsc -p .",
     "test": "vitest run"
