@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+.vite/
+apps/shell/src-tauri/target/
+apps/shell/src-tauri/gen/
+apps/shell/src-tauri/binaries/
+.DS_Store
