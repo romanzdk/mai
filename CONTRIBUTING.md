@@ -1,7 +1,10 @@
 # Contributing
 
+mai is a proof of concept and is no longer actively developed, so pull requests may not get a
+review. Forks are welcome.
+
 1. `pnpm install`
-2. Make the change. Keep it small and inside the current milestone.
+2. Make the change. Keep it small and focused.
 3. Run the checks:
    ```sh
    pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e
