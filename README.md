@@ -4,6 +4,8 @@
 
 **A personal AI shell: type what you want done, and background Claude agents do it.**
 
+*mai* is pronounced like **"my"** (/maɪ/), as in *my AI*.
+
 [![CI](https://github.com/romanzdk/mai/actions/workflows/ci.yml/badge.svg)](https://github.com/romanzdk/mai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Ubuntu-lightgrey)
